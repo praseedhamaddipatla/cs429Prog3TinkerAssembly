@@ -421,16 +421,16 @@ void checkInstrArgs(const char *name, int expected, int actual, InstrType type)
     }
 }
 
-// encode R-type instruction
-void encodeRType(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt)
+// encode R instruction
+void encodeR(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt)
 {
     *rd = parseReg(tok[1]);
     *rs = parseReg(tok[2]);
     *rt = parseReg(tok[3]);
 }
 
-// encode I-type instruction
-void encodeIType(char tok[MAX_TOK][MAX_TOK_LEN], const char *instrName, uint32_t *rd, uint32_t *imm)
+// encode I instruction
+void encodeI(char tok[MAX_TOK][MAX_TOK_LEN], const char *instrName, uint32_t *rd, uint32_t *imm)
 {
     *rd = parseReg(tok[1]);
     
@@ -449,7 +449,7 @@ void encodeIType(char tok[MAX_TOK][MAX_TOK_LEN], const char *instrName, uint32_t
 }
 
 // encode branch instruction
-void encodeBranchType(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *rd, uint32_t *imm)
+void encodeBranch(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *rd, uint32_t *imm)
 {
     // changes opcodes based on input
     if (strcmp(tok[0], "brr") == 0 && tok[1][0] != 'r')
@@ -465,7 +465,7 @@ void encodeBranchType(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *rd
 }
 
 // encode privileged instruction
-void encodePrivType(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt, uint32_t *imm)
+void encodePriv(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt, uint32_t *imm)
 {
     *rd = parseReg(tok[1]);
     *rs = parseReg(tok[2]);
@@ -474,7 +474,7 @@ void encodePrivType(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, 
 }
 
 // encode mov instruction with different formats
-void encodeMovType(char tok[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_t *rd, uint32_t *rs, uint32_t *imm)
+void encodeMov(char tok[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_t *rd, uint32_t *rs, uint32_t *imm)
 {
     // format: mov rd, rs (opcode 0x11)
     if (n == 3 && tok[1][0] == 'r' && tok[2][0] == 'r')
@@ -538,7 +538,7 @@ InstrType findInstrType(char *name, uint32_t *opcode, int *expectedOps)
 }
 
 // combine fields into 32-bit instruction
-uint32_t buildInstruction(uint32_t op, uint32_t rd, uint32_t rs, uint32_t rt, uint32_t imm)
+uint32_t buildInstr(uint32_t op, uint32_t rd, uint32_t rs, uint32_t rt, uint32_t imm)
 {
     uint32_t result = 0;
     result = result | (op << 26);
@@ -564,23 +564,23 @@ uint32_t encode(char tok[MAX_TOK][MAX_TOK_LEN], int n)
     switch (type)
     {
     case R:
-        encodeRType(tok, &rd, &rs, &rt);
+        encodeR(tok, &rd, &rs, &rt);
         break;
     case I:
-        encodeIType(tok, tok[0], &rd, &imm);
+        encodeI(tok, tok[0], &rd, &imm);
         break;
     case OTHER:
         rd = parseReg(tok[1]);
         rs = parseReg(tok[2]);
         break;
     case BR:
-        encodeBranchType(tok, &op, &rd, &imm);
+        encodeBranch(tok, &op, &rd, &imm);
         break;
     case PRIV:
-        encodePrivType(tok, &rd, &rs, &rt, &imm);
+        encodePriv(tok, &rd, &rs, &rt, &imm);
         break;
     case MOV:
-        encodeMovType(tok, n, &op, &rd, &rs, &imm);
+        encodeMov(tok, n, &op, &rd, &rs, &imm);
         break;
     case NO_OP:
         // return instruction, nothing to parse
@@ -590,11 +590,11 @@ uint32_t encode(char tok[MAX_TOK][MAX_TOK_LEN], int n)
         exit(1);
     }
 
-    return buildInstruction(op, rd, rs, rt, imm);
+    return buildInstr(op, rd, rs, rt, imm);
 }
 
 // process code section line in pass2
-void processCodeLine(FILE *out, char *line)
+void processCode(FILE *out, char *line)
 {
     char buf[MAX_LINE];
     strcpy(buf, &line[1]);
@@ -612,7 +612,7 @@ void processCodeLine(FILE *out, char *line)
 }
 
 // process data section line in pass2
-void processDataLine(FILE *out, char *line)
+void processData(FILE *out, char *line)
 {
     // validate data is not negative (unsigned)
     if (isNegativeLiteral(&line[1]))
@@ -665,11 +665,11 @@ void pass2(FILE *in, FILE *out)
                 
             if (sec == CODE)
             {
-                processCodeLine(out, line);
+                processCode(out, line);
             }
             else if (sec == DATA)
             {
-                processDataLine(out, line);
+                processData(out, line);
             }
         }
     }
