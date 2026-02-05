@@ -322,6 +322,25 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     return 0;
 }
 
+void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
+{
+    fprintf(out, "\t%s", toks[0]);
+    for (int i = 1; i < n; i++)
+    {
+        if (toks[i][0] == ':')
+        {
+            uint64_t val = findLabelAddress(&toks[i][1]);
+            fprintf(out, "%s%llu", (i == 1 ? " " : ", "),
+                    (unsigned long long)val);
+        }
+        else
+        {
+            fprintf(out, "%s%s", (i == 1 ? " " : ", "), toks[i]);
+        }
+    }
+    fprintf(out, "\n");
+}
+
 void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
 {
     char buf[MAX_LINE];
@@ -359,26 +378,6 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
 
     }
 }
-
-void printResolvedInstruction(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
-{
-    fprintf(out, "\t%s", toks[0]);
-    for (int i = 1; i < n; i++)
-    {
-        if (toks[i][0] == ':')
-        {
-            uint64_t val = findLabelAddress(&toks[i][1]);
-            fprintf(out, "%s%llu", (i == 1 ? " " : ", "),
-                    (unsigned long long)val);
-        }
-        else
-        {
-            fprintf(out, "%s%s", (i == 1 ? " " : ", "), toks[i]);
-        }
-    }
-    fprintf(out, "\n");
-}
-
 
 void firstPass(FILE *in, FILE *mid)
 {
