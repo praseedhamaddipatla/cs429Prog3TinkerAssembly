@@ -205,7 +205,20 @@ uint64_t convertToNumber(const char *lit)
 
     errno = 0;
     char *end;
-    uint64_t result = strtoull(lit, &end, 0);
+    uint64_t result;
+    
+    // Check for hex prefix
+    if (lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X'))
+    {
+        // Hex number - use base 0 to auto-detect
+        result = strtoull(lit, &end, 0);
+    }
+    else
+    {
+        // Decimal number - always use base 10 to avoid octal interpretation
+        // This handles numbers with or without leading zeros
+        result = strtoull(lit, &end, 10);
+    }
 
     if (errno == ERANGE || *end != '\0')
     {
@@ -347,24 +360,26 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
         {
             if (toks[1][0] == 'r' && toks[2][0] != 'r')
             {
-                uint64_t val = convertToNumber(toks[2]);
-                fprintf(out, "(%s)(%lld), %s\n",
-                        toks[1], (long long)(int64_t)val, toks[3]);
+                // Validate the number but print original string
+                convertToNumber(toks[2]);
+                fprintf(out, "(%s)(%s), %s\n",
+                        toks[1], toks[2], toks[3]);
             }
             else
             {
-                uint64_t val = convertToNumber(toks[3]);
-                fprintf(out, "%s, (%s)(%lld)\n",
-                        toks[1], toks[2], (long long)(int64_t)val);
+                // Validate the number but print original string
+                convertToNumber(toks[3]);
+                fprintf(out, "%s, (%s)(%s)\n",
+                        toks[1], toks[2], toks[3]);
             }
         }
         else if (n == 5)
         {
-            uint64_t v1 = convertToNumber(toks[2]);
-            uint64_t v2 = convertToNumber(toks[4]);
-            fprintf(out, "(%s)(%lld), (%s)(%lld)\n",
-                    toks[1], (long long)(int64_t)v1,
-                    toks[3], (long long)(int64_t)v2);
+            // Validate the numbers but print original strings
+            convertToNumber(toks[2]);
+            convertToNumber(toks[4]);
+            fprintf(out, "(%s)(%s), (%s)(%s)\n",
+                    toks[1], toks[2], toks[3], toks[4]);
         }
         else
         {
@@ -376,17 +391,21 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
     else
     {
         fprintf(out, "\t%s", toks[0]);
-        for (int i = 1; i < n; i++)
+        // Only add operands if there are any
+        if (n > 1)
         {
-            if (toks[i][0] == ':')
+            for (int i = 1; i < n; i++)
             {
-                uint64_t val = findLabelAddress(&toks[i][1]);
-                fprintf(out, "%s%llu", (i == 1 ? " " : ", "),
-                        (unsigned long long)val);
-            }
-            else
-            {
-                fprintf(out, "%s%s", (i == 1 ? " " : ", "), toks[i]);
+                if (toks[i][0] == ':')
+                {
+                    uint64_t val = findLabelAddress(&toks[i][1]);
+                    fprintf(out, "%s%llu", (i == 1 ? " " : ", "),
+                            (unsigned long long)val);
+                }
+                else
+                {
+                    fprintf(out, "%s%s", (i == 1 ? " " : ", "), toks[i]);
+                }
             }
         }
         fprintf(out, "\n");
@@ -594,14 +613,8 @@ void firstPass(FILE *in, FILE *mid)
         }
 
         if (strcmp(line, ".code") == 0 && line[0] == '.')
-
         {
             sec = CODE;
-            if (lastWritten != CODE)
-            {
-                fprintf(mid, ".code\n");
-                lastWritten = CODE;
-            }
             continue;
         }
 
@@ -613,15 +626,8 @@ void firstPass(FILE *in, FILE *mid)
         }
 
         if (strcmp(line, ".data") == 0 && line[0] == '.')
-
         {
             sec = DATA;
-            if (lastWritten != DATA)
-            {
-                fprintf(mid, ".data\n");
-                lastWritten = DATA;
-            }
-
             continue;
         }
 
@@ -633,6 +639,20 @@ void firstPass(FILE *in, FILE *mid)
 
         if (line[0] == '\t')
         {
+            // Write section header only when switching to a different section
+            if (sec != lastWritten && sec != NONE)
+            {
+                if (sec == CODE)
+                {
+                    fprintf(mid, ".code\n");
+                }
+                else if (sec == DATA)
+                {
+                    fprintf(mid, ".data\n");
+                }
+                lastWritten = sec;
+            }
+            
             handleTabLine(mid, line, sec, &addr);
         }
         // FIX: Check for lines that don't start with recognized patterns
