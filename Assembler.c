@@ -441,11 +441,9 @@ void collectLabels(FILE *in)
     char line[MAX_LINE];
     Section sec = NONE;
     uint64_t addr = CODE_START;
-    int lineNum = 0;
 
     while (fgets(line, sizeof(line), in))
     {
-        lineNum++;
         cleanLine(line);
 
         if (line[0] == '\0')
@@ -453,34 +451,31 @@ void collectLabels(FILE *in)
             continue;
         }
 
-        if (strcmp(line, ".code") == 0 && line[0] == '.')
-
+        // Handle directives
+        if (line[0] == '.')
         {
-            sec = CODE;
-            addr = CODE_START;
-            continue;
+            if (strcmp(line, ".code") == 0)
+            {
+                if(sec==NONE){
+                    addr=CODE_START;
+                }
+                sec = CODE;
+                continue;
+            }
+            else if (strcmp(line, ".data") == 0)
+            {
+                sec = DATA;
+                continue;
+            }
+            else
+            {
+                fprintf(stderr, "Error: invalid directive '%s'\n", line);
+                hadError = 1;
+                exit(1);
+            }
         }
 
-        if (strncmp(line, ".code", 5) == 0 && strcmp(line, ".code") != 0)
-        {
-            fprintf(stderr, "Error: invalid directive '%s'\n", line);
-            hadError = 1;
-            exit(1);
-        }
-
-        if (strcmp(line, ".data") == 0 && line[0] == '.')
-        {
-            sec = DATA;
-            continue;
-        }
-
-        if (strncmp(line, ".data", 5) == 0 && strcmp(line, ".data") != 0)
-        {
-            fprintf(stderr, "Error: invalid directive '%s'\n", line);
-            hadError = 1;
-            exit(1);
-        }
-
+        // Handle labels
         if (line[0] == ':')
         {
             if (strchr(line, '\t'))
@@ -493,22 +488,7 @@ void collectLabels(FILE *in)
             continue;
         }
 
-        if (strchr(line, '\t') || strchr(line, ' '))
-        {
-            fprintf(stderr, "Error: label must be alone on its line\n");
-            exit(1);
-        }
-
-        // Validate label name
-        for (char *p = &line[1]; *p; p++)
-        {
-            if (!isalnum((unsigned char)*p) && *p != '_')
-            {
-                fprintf(stderr, "Error: invalid label name '%s'\n", line);
-                exit(1);
-            }
-        }
-
+        // Handle instructions/data
         if (line[0] == '\t')
         {
             if (line[1] == ':')
@@ -516,7 +496,7 @@ void collectLabels(FILE *in)
                 continue;
             }
 
-            // Estimate address increment for macro expansion
+            // Estimate address increment
             char buf[MAX_LINE];
             strcpy(buf, &line[1]);
             char toks[MAX_TOK][MAX_TOK_LEN];
@@ -531,7 +511,6 @@ void collectLabels(FILE *in)
             {
                 char *name = toks[0];
 
-                // Account for macro expansions
                 if (strcmp(name, "halt") == 0 || strcmp(name, "in") == 0 ||
                     strcmp(name, "out") == 0 || strcmp(name, "clr") == 0)
                 {
@@ -543,18 +522,31 @@ void collectLabels(FILE *in)
                 }
                 else if (strcmp(name, "ld") == 0)
                 {
-                    addr += 52; // 13 instructions * 4 bytes
+                    addr += 52;
                 }
                 else
                 {
-                    addr += 4; // Regular instruction
+                    addr += 4;
                 }
             }
-            if (sec == DATA)
+            else if (sec == DATA)
             {
                 addr += 4;
             }
+            continue;
         }
+
+        // If we get here, line format is invalid
+        if (line[0] == ' ')
+        {
+            fprintf(stderr, "Error: instruction must begin with a tab\n");
+        }
+        else
+        {
+            fprintf(stderr, "Error: invalid line format\n");
+        }
+        hadError = 1;
+        exit(1);
     }
 }
 
@@ -577,6 +569,7 @@ void firstPass(FILE *in, FILE *mid)
             continue;
         }
 
+        // Check for invalid leading spaces (not tabs)
         if (line[0] == ' ')
         {
             fprintf(stderr, "Error: instruction must begin with a tab\n");
@@ -584,85 +577,63 @@ void firstPass(FILE *in, FILE *mid)
             exit(1);
         }
 
-        if (line[0] != '.' && isspace((unsigned char)line[0]))
-        {
-            fprintf(stderr, "Error: directives must start at column 0\n");
-            exit(1);
-        }
-
+        // Handle directives
         if (line[0] == '.')
         {
-            if (strcmp(line, ".code") != 0 && strcmp(line, ".data") != 0)
+            if (strcmp(line, ".code") == 0)
+            {
+                sec = CODE;
+                if (lastWritten != CODE)
+                {
+                    fprintf(mid, ".code\n");
+                    lastWritten = CODE;
+                }
+                continue;
+            }
+            else if (strcmp(line, ".data") == 0)
+            {
+                sec = DATA;
+                if (lastWritten != DATA)
+                {
+                    fprintf(mid, ".data\n");
+                    lastWritten = DATA;
+                }
+                continue;
+            }
+            else
             {
                 fprintf(stderr, "Error: invalid directive '%s'\n", line);
+                hadError = 1;
                 exit(1);
             }
         }
 
-        if (strcmp(line, ".code") == 0 && line[0] == '.')
-
-        {
-            sec = CODE;
-            if (lastWritten != CODE)
-            {
-                fprintf(mid, ".code\n");
-                lastWritten = CODE;
-            }
-            continue;
-        }
-
-        if (strncmp(line, ".code", 5) == 0 && strcmp(line, ".code") != 0)
-        {
-            fprintf(stderr, "Error: invalid directive '%s'\n", line);
-            hadError = 1;
-            exit(1);
-        }
-
-        if (strcmp(line, ".data") == 0 && line[0] == '.')
-
-        {
-            sec = DATA;
-            if (lastWritten != DATA)
-            {
-                fprintf(mid, ".data\n");
-                lastWritten = DATA;
-            }
-
-            continue;
-        }
-
-        if (strncmp(line, ".data", 5) == 0 && strcmp(line, ".data") != 0)
-        {
-            fprintf(stderr, "Error: invalid directive '%s'\n", line);
-            hadError = 1;
-            exit(1);
-        }
-
+        // Handle labels
         if (line[0] == ':')
         {
+            // Check if there's a tab after the label (label not alone on line)
+            if (strchr(line, '\t'))
+            {
+                fprintf(stderr, "Error: label must be alone on its line\n");
+                hadError = 1;
+                exit(1);
+            }
             // Labels already collected, skip
             continue;
         }
 
-        if (strchr(line, '\t') || strchr(line, ' '))
-        {
-            fprintf(stderr, "Error: label must be alone on its line\n");
-            exit(1);
-        }
-
-        // Validate label name
-        for (char *p = &line[1]; *p; p++)
-        {
-            if (!isalnum((unsigned char)*p) && *p != '_')
-            {
-                fprintf(stderr, "Error: invalid label name '%s'\n", line);
-                exit(1);
-            }
-        }
-
+        // Handle instructions/data
         if (line[0] == '\t')
         {
             handleTabLine(mid, line, sec, &addr);
+        }
+        else
+        {
+            // Line doesn't start with '.', ':', '\t', or ' ' (space already handled)
+            // This is an error - likely a malformed label or instruction
+            fprintf(stderr, "Error: invalid line format\n");
+            hadError = 1;
+            exit(1);
         }
     }
     inFirst = 0;
@@ -1056,6 +1027,7 @@ void secondPass(FILE *mid, FILE *out)
         if (line[0] == '\0')
             continue;
 
+        // Check for invalid leading spaces (not tabs)
         if (line[0] == ' ')
         {
             fprintf(stderr, "Error: instruction must begin with a tab\n");
@@ -1063,52 +1035,34 @@ void secondPass(FILE *mid, FILE *out)
             exit(1);
         }
 
-        if (line[0] != '.' && isspace((unsigned char)line[0]))
-        {
-            fprintf(stderr, "Error: directives must start at column 0\n");
-            exit(1);
-        }
-
+        // Handle directives
         if (line[0] == '.')
         {
-            if (strcmp(line, ".code") != 0 && strcmp(line, ".data") != 0)
+            if (strcmp(line, ".code") == 0)
+            {
+                sec = CODE;
+                continue;
+            }
+            else if (strcmp(line, ".data") == 0)
+            {
+                sec = DATA;
+                continue;
+            }
+            else
             {
                 fprintf(stderr, "Error: invalid directive '%s'\n", line);
+                hadError = 1;
                 exit(1);
             }
         }
 
-        if (strcmp(line, ".code") == 0)
-        {
-            sec = CODE;
-            continue;
-        }
-
-        if (strcmp(line, ".data") == 0)
-        {
-            sec = DATA;
-            continue;
-        }
-
+        // Handle labels (skip them - they were already processed)
         if (line[0] == ':')
+        {
             continue;
-
-        if (strchr(line, '\t') || strchr(line, ' '))
-        {
-            fprintf(stderr, "Error: label must be alone on its line\n");
-            exit(1);
         }
 
-        // Validate label name
-        for (char *p = &line[1]; *p; p++)
-        {
-            if (!isalnum((unsigned char)*p) && *p != '_')
-            {
-                fprintf(stderr, "Error: invalid label name '%s'\n", line);
-                exit(1);
-            }
-        }
-
+        // Handle instructions/data
         if (line[0] == '\t')
         {
             if (line[1] == ':')
@@ -1125,7 +1079,14 @@ void secondPass(FILE *mid, FILE *out)
                 writeCodeInstr(out, line);
             else if (sec == DATA)
                 writeDataValue(out, line);
+            
+            continue;
         }
+
+        // If we get here, line format is invalid
+        fprintf(stderr, "Error: invalid line format\n");
+        hadError = 1;
+        exit(1);
     }
 }
 
