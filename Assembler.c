@@ -155,30 +155,19 @@ int splitIntoTokens(char *line, char toks[MAX_TOK][MAX_TOK_LEN])
 
 int getRegisterNumber(const char *reg)
 {
-    if (reg == NULL || reg[0] != 'r')
-    {
-        fprintf(stderr, "Error: invalid register format\n");
-        hadError = 1;
-        exit(1);
-    }
-
-    if (reg[1] == '\0' || !isdigit(reg[1]))
-    {
-        fprintf(stderr, "Error: invalid register format\n");
-        hadError = 1;
-        exit(1);
-    }
+    if (!reg || reg[0] != 'r' || !isdigit(reg[1]) || reg[2] && !isdigit(reg[2]))
+        goto bad;
 
     int num = atoi(&reg[1]);
-
     if (num < 0 || num > 31)
-    {
-        fprintf(stderr, "Error: register out of range\n");
-        hadError = 1;
-        exit(1);
-    }
+        goto bad;
 
     return num;
+
+bad:
+    fprintf(stderr, "Error: invalid register '%s'\n", reg);
+    hadError = 1;
+    exit(1);
 }
 
 int checkIfNegative(const char *lit)
@@ -281,6 +270,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "push") == 0)
     {
         checkMacroArgumentCount("push", 1, n);
+        getRegisterNumber(toks[1]);
         fprintf(out, "\tmov (r31)(-8), %s\n", toks[1]);
         fprintf(out, "\tsubi r31, 8\n");
         *addr += 8;
@@ -290,6 +280,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "pop") == 0)
     {
         checkMacroArgumentCount("pop", 1, n);
+        getRegisterNumber(toks[1]);
         fprintf(out, "\tmov %s, (r31)(0)\n", toks[1]);
         fprintf(out, "\taddi r31, 8\n");
         *addr += 8;
@@ -309,6 +300,13 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         }
 
         uint64_t val = convertToNumber(toks[2]);
+        if (toks[2][0] != ':' && val > UINT64_MAX)
+        {
+            fprintf(stderr, "Error: ld literal overflow\n");
+            hadError = 1;
+            exit(1);
+        }
+
         int reg = getRegisterNumber(toks[1]);
         writeLdMacro(out, reg, val);
         *addr += 52; // 13 instructions * 4 bytes
@@ -441,21 +439,41 @@ void collectLabels(FILE *in)
             continue;
         }
 
-        if (strcmp(line, ".code") == 0)
+        if (strcmp(line, ".code") == 0 && line[0] == '.')
+
         {
             sec = CODE;
             continue;
         }
 
-        if (strcmp(line, ".data") == 0)
+        if (strncmp(line, ".code", 5) == 0 && strcmp(line, ".code") != 0)
+        {
+            fprintf(stderr, "Error: invalid directive '%s'\n", line);
+            hadError = 1;
+            exit(1);
+        }
+
+        if (strcmp(line, ".code") == 0 && line[0] == '.')
         {
             sec = DATA;
             continue;
         }
 
+        if (strncmp(line, ".data", 5) == 0 && strcmp(line, ".data") != 0)
+        {
+            fprintf(stderr, "Error: invalid directive '%s'\n", line);
+            hadError = 1;
+            exit(1);
+        }
+
         if (line[0] == ':')
         {
-
+            if (strchr(line, '\t'))
+            {
+                fprintf(stderr, "Error: label must be alone on its line\n");
+                hadError = 1;
+                exit(1);
+            }
             addLabelToArray(&line[1], addr);
             continue;
         }
@@ -511,7 +529,6 @@ void collectLabels(FILE *in)
 
 void firstPass(FILE *in, FILE *mid)
 {
-
     inFirst = 1;
     char line[MAX_LINE];
     Section sec = NONE;
@@ -529,7 +546,15 @@ void firstPass(FILE *in, FILE *mid)
             continue;
         }
 
-        if (strcmp(line, ".code") == 0)
+        if (line[0] == ' ')
+        {
+            fprintf(stderr, "Error: instruction must begin with a tab\n");
+            hadError = 1;
+            exit(1);
+        }
+
+        if (strcmp(line, ".code") == 0 && line[0] == '.')
+
         {
             sec = CODE;
             if (lastWritten != CODE)
@@ -540,7 +565,15 @@ void firstPass(FILE *in, FILE *mid)
             continue;
         }
 
-        if (strcmp(line, ".data") == 0)
+        if (strncmp(line, ".code", 5) == 0 && strcmp(line, ".code") != 0)
+        {
+            fprintf(stderr, "Error: invalid directive '%s'\n", line);
+            hadError = 1;
+            exit(1);
+        }
+
+        if (strcmp(line, ".data") == 0 && line[0] == '.')
+
         {
             sec = DATA;
             if (lastWritten != DATA)
@@ -550,6 +583,13 @@ void firstPass(FILE *in, FILE *mid)
             }
 
             continue;
+        }
+
+        if (strncmp(line, ".data", 5) == 0 && strcmp(line, ".data") != 0)
+        {
+            fprintf(stderr, "Error: invalid directive '%s'\n", line);
+            hadError = 1;
+            exit(1);
         }
 
         if (line[0] == ':')
@@ -603,6 +643,17 @@ void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *r
 
     int uns = (strcmp(instr, "addi") == 0 || strcmp(instr, "subi") == 0 ||
                strcmp(instr, "shftli") == 0 || strcmp(instr, "shftri") == 0);
+
+    if (toks[2][0] == ':' &&
+        (strcmp(instr, "addi") == 0 ||
+         strcmp(instr, "subi") == 0 ||
+         strcmp(instr, "shftli") == 0 ||
+         strcmp(instr, "shftri") == 0))
+    {
+        fprintf(stderr, "Error: label not allowed as immediate\n");
+        hadError = 1;
+        exit(1);
+    }
 
     if (uns && toks[2][0] != ':' && checkIfNegative(toks[2]))
     {
@@ -835,6 +886,13 @@ void writeCodeInstr(FILE *out, char *line)
         exit(1);
     }
 
+    if (n > MAX_TOK)
+    {
+        fprintf(stderr, "Error: too many operands\n");
+        hadError = 1;
+        exit(1);
+    }
+
     uint32_t mc = convertToMachineCode(toks, n);
 
     // Write in little-endian byte order
@@ -884,6 +942,13 @@ void secondPass(FILE *mid, FILE *out)
 
         if (line[0] == '\0')
             continue;
+
+        if (line[0] == ' ')
+        {
+            fprintf(stderr, "Error: instruction must begin with a tab\n");
+            hadError = 1;
+            exit(1);
+        }
 
         if (strcmp(line, ".code") == 0)
         {
