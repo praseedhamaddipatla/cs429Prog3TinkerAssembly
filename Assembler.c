@@ -153,21 +153,23 @@ int splitIntoTokens(char *line, char toks[MAX_TOK][MAX_TOK_LEN])
     return cnt;
 }
 
-int getRegisterNumber(const char *reg)
+int getRegisterNumber(const char *tok)
 {
-    if (!reg || reg[0] != 'r' || !isdigit(reg[1]) || (reg[2] && !isdigit(reg[2])))
-        goto bad;
+    if (!tok || tok[0] != 'r') {
+        fprintf(stderr, "Error: invalid register '%s'\n", tok);
+        exit(1);
+    }
 
-    int num = atoi(&reg[1]);
-    if (num < 0 || num > 31)
-        goto bad;
+    char *end;
+    long reg = strtol(tok + 1, &end, 10);
 
-    return num;
+    // Must consume the entire string and be in range
+    if (*end != '\0' || reg < 0 || reg > 31) {
+        fprintf(stderr, "Error: invalid register '%s'\n", tok);
+        exit(1);
+    }
 
-bad:
-    fprintf(stderr, "Error: invalid register '%s'\n", reg);
-    hadError = 1;
-    exit(1);
+    return (int)reg;
 }
 
 int checkIfNegative(const char *lit)
@@ -177,7 +179,6 @@ int checkIfNegative(const char *lit)
 
 uint64_t convertToNumber(const char *lit)
 {
-
     if (lit == NULL)
     {
         fprintf(stderr, "Error: NULL literal\n");
@@ -191,7 +192,16 @@ uint64_t convertToNumber(const char *lit)
         return addr;
     }
 
-    uint64_t result = strtoull(lit, NULL, 0);
+    char *endptr = NULL;
+    uint64_t result = strtoull(lit, &endptr, 0);
+
+    if (endptr == lit || *endptr != '\0')
+    {
+        fprintf(stderr, "Error: invalid numeric literal '%s'\n", lit);
+        hadError = 1;
+        exit(1);
+    }
+
     return result;
 }
 
@@ -207,7 +217,7 @@ void writeLdMacro(FILE *out, int rd, uint64_t val)
     parts[1] = (val >> 40) & 0xFFF;
     parts[2] = (val >> 28) & 0xFFF;
     parts[3] = (val >> 16) & 0xFFF;
-    parts[4] = (val >> 4)  & 0xFFF;
+    parts[4] = (val >> 4) & 0xFFF;
     parts[5] = val & 0xF;
 
     fprintf(out, "\txor r%d, r%d, r%d\n", rd, rd, rd);
@@ -483,6 +493,22 @@ void collectLabels(FILE *in)
             continue;
         }
 
+        if (strchr(line, '\t') || strchr(line, ' '))
+        {
+            fprintf(stderr, "Error: label must be alone on its line\n");
+            exit(1);
+        }
+
+        // Validate label name
+        for (char *p = &line[1]; *p; p++)
+        {
+            if (!isalnum((unsigned char)*p) && *p != '_')
+            {
+                fprintf(stderr, "Error: invalid label name '%s'\n", line);
+                exit(1);
+            }
+        }
+
         if (line[0] == '\t')
         {
             if (line[1] == ':')
@@ -558,6 +584,21 @@ void firstPass(FILE *in, FILE *mid)
             exit(1);
         }
 
+        if (line[0] != '.' && isspace((unsigned char)line[0]))
+        {
+            fprintf(stderr, "Error: directives must start at column 0\n");
+            exit(1);
+        }
+
+        if (line[0] == '.')
+        {
+            if (strcmp(line, ".code") != 0 && strcmp(line, ".data") != 0)
+            {
+                fprintf(stderr, "Error: invalid directive '%s'\n", line);
+                exit(1);
+            }
+        }
+
         if (strcmp(line, ".code") == 0 && line[0] == '.')
 
         {
@@ -601,6 +642,22 @@ void firstPass(FILE *in, FILE *mid)
         {
             // Labels already collected, skip
             continue;
+        }
+
+        if (strchr(line, '\t') || strchr(line, ' '))
+        {
+            fprintf(stderr, "Error: label must be alone on its line\n");
+            exit(1);
+        }
+
+        // Validate label name
+        for (char *p = &line[1]; *p; p++)
+        {
+            if (!isalnum((unsigned char)*p) && *p != '_')
+            {
+                fprintf(stderr, "Error: invalid label name '%s'\n", line);
+                exit(1);
+            }
         }
 
         if (line[0] == '\t')
@@ -667,6 +724,12 @@ void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *r
         exit(1);
     }
 
+    if (toks[2][0] == ':')
+    {
+        fprintf(stderr, "Error: label not allowed as immediate\n");
+        exit(1);
+    }
+
     uint64_t val = convertToNumber(toks[2]);
 
     if (toks[2][0] != ':')
@@ -721,7 +784,7 @@ void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *r
     else
     {
         *rd = getRegisterNumber(toks[1]);
-        *imm=0;
+        *imm = 0;
     }
 }
 
@@ -744,6 +807,12 @@ void encodePrivType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs,
 
 void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_t *rd, uint32_t *rs, uint32_t *imm)
 {
+    if (n < 3 || n > 4)
+    {
+        fprintf(stderr, "Error: invalid mov format\n");
+        exit(1);
+    }
+
     if (n == 3 && toks[1][0] == 'r' && toks[2][0] == 'r')
     {
         *op = 0x11;
@@ -858,6 +927,12 @@ uint32_t convertToMachineCode(char toks[MAX_TOK][MAX_TOK_LEN], int n)
 
     InstrType type = findInstructionInfo(toks[0], &op, &exp);
     checkInstructionOperands(toks[0], exp, n, type);
+
+    if (n != exp + 1 && type != MOV)
+    {
+        fprintf(stderr, "Error: wrong number of operands for '%s'\n", toks[0]);
+        exit(1);
+    }
 
     if (type == R)
         encodeRType(toks, &rd, &rs, &rt);
@@ -988,6 +1063,21 @@ void secondPass(FILE *mid, FILE *out)
             exit(1);
         }
 
+        if (line[0] != '.' && isspace((unsigned char)line[0]))
+        {
+            fprintf(stderr, "Error: directives must start at column 0\n");
+            exit(1);
+        }
+
+        if (line[0] == '.')
+        {
+            if (strcmp(line, ".code") != 0 && strcmp(line, ".data") != 0)
+            {
+                fprintf(stderr, "Error: invalid directive '%s'\n", line);
+                exit(1);
+            }
+        }
+
         if (strcmp(line, ".code") == 0)
         {
             sec = CODE;
@@ -1002,6 +1092,22 @@ void secondPass(FILE *mid, FILE *out)
 
         if (line[0] == ':')
             continue;
+
+        if (strchr(line, '\t') || strchr(line, ' '))
+        {
+            fprintf(stderr, "Error: label must be alone on its line\n");
+            exit(1);
+        }
+
+        // Validate label name
+        for (char *p = &line[1]; *p; p++)
+        {
+            if (!isalnum((unsigned char)*p) && *p != '_')
+            {
+                fprintf(stderr, "Error: invalid label name '%s'\n", line);
+                exit(1);
+            }
+        }
 
         if (line[0] == '\t')
         {
