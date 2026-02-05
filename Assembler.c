@@ -195,9 +195,6 @@ uint64_t convertToNumber(const char *lit)
 
     if (lit[0] == ':')
     {
-        if(inFirst){
-            return 0;
-        }
         return findLabelAddress(&lit[1]);
     }
 
@@ -279,7 +276,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     {
         checkMacroArgumentCount("push", 1, n);
         fprintf(out, "\tmov (r31)(-8), %s\n", toks[1]);
-        fprintf(out, "\t r31, 8\n");
+        fprintf(out, "\tsubi r31, 8\n");
         *addr += 8;
         return 1;
     }
@@ -287,8 +284,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "pop") == 0)
     {
         checkMacroArgumentCount("pop", 1, n);
-        fprintf(out, "\tsubi r31, 8\n");
         fprintf(out, "\tmov %s, (r31)(0)\n", toks[1]);
+        fprintf(out, "\taddi r31, 8\n");
         *addr += 8;
         return 1;
     }
@@ -316,21 +313,70 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
 
 void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
 {
-    fprintf(out, "\t%s", toks[0]);
-    for (int i = 1; i < n; i++)
+    // Special handling for mov instruction which needs parentheses reconstructed
+    if (strcmp(toks[0], "mov") == 0)
     {
-        if (toks[i][0] == ':')
+        fprintf(out, "\t%s ", toks[0]);
+        
+        // Pattern detection based on number of tokens
+        if (n == 3)
         {
-            uint64_t val = findLabelAddress(&toks[i][1]);
-            fprintf(out, "%s%llu", (i == 1 ? " " : ", "),
-                    (unsigned long long)val);
+            // mov rd, rs (2 operands after splitting)
+            fprintf(out, "%s, %s\n", toks[1], toks[2]);
+        }
+        else if (n == 4)
+        {
+            // Either: mov (rd)(imm), rs OR mov rd, (rs)(imm) OR mov rd, imm
+            // Check if token 1 is a register and token 2 is a number (could be negative)
+            int tok1_is_reg = (toks[1][0] == 'r');
+            int tok2_is_num = (toks[2][0] == '-' || isdigit(toks[2][0]) || toks[2][0] == ':');
+            
+            if (tok1_is_reg && tok2_is_num)
+            {
+                // mov rd, imm (but shouldn't be 4 tokens... this is mov rd, rs, imm which is invalid for output)
+                // Actually this is: mov (rd)(imm), rs pattern split into: mov, rd, imm, rs
+                fprintf(out, "(%s)(%s), %s\n", toks[1], toks[2], toks[3]);
+            }
+            else
+            {
+                // mov rd, (rs)(imm) pattern split into: mov, rd, rs, imm
+                uint64_t val = (toks[3][0] == ':') ? findLabelAddress(&toks[3][1]) : strtoull(toks[3], NULL, 0);
+                fprintf(out, "%s, (%s)(%lld)\n", toks[1], toks[2], (long long)(int64_t)val);
+            }
+        }
+        else if (n == 5)
+        {
+            // mov (rd)(imm1), (rs)(imm2) pattern split into: mov, rd, imm1, rs, imm2
+            uint64_t val1 = (toks[2][0] == ':') ? findLabelAddress(&toks[2][1]) : strtoull(toks[2], NULL, 0);
+            uint64_t val2 = (toks[4][0] == ':') ? findLabelAddress(&toks[4][1]) : strtoull(toks[4], NULL, 0);
+            fprintf(out, "(%s)(%lld), (%s)(%lld)\n", toks[1], (long long)(int64_t)val1, toks[3], (long long)(int64_t)val2);
         }
         else
         {
-            fprintf(out, "%s%s", (i == 1 ? " " : ", "), toks[i]);
+            fprintf(stderr, "Error: unexpected mov token count %d\n", n);
+            hadError = 1;
+            exit(1);
         }
     }
-    fprintf(out, "\n");
+    else
+    {
+        // Non-mov instructions - handle normally
+        fprintf(out, "\t%s", toks[0]);
+        for (int i = 1; i < n; i++)
+        {
+            if (toks[i][0] == ':')
+            {
+                uint64_t val = findLabelAddress(&toks[i][1]);
+                fprintf(out, "%s%llu", (i == 1 ? " " : ", "),
+                        (unsigned long long)val);
+            }
+            else
+            {
+                fprintf(out, "%s%s", (i == 1 ? " " : ", "), toks[i]);
+            }
+        }
+        fprintf(out, "\n");
+    }
 }
 
 void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
@@ -365,14 +411,12 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     {
         uint64_t val = convertToNumber(orig);
         fprintf(out, "\t%llu\n", (unsigned long long)val);
-        *addr += 8;
+        *addr += 4;
     }
 }
 
-void firstPass(FILE *in, FILE *mid)
+void collectLabels(FILE *in)
 {
-    inFirst=1;
-    Section last = NONE;
     char line[MAX_LINE];
     Section sec = NONE;
     uint64_t addr = CODE_START;
@@ -387,10 +431,88 @@ void firstPass(FILE *in, FILE *mid)
         if (strcmp(line, ".code") == 0)
         {
             sec = CODE;
-            if (last != CODE)
+            continue;
+        }
+
+        if (strcmp(line, ".data") == 0)
+        {
+            sec = DATA;
+            continue;
+        }
+
+        if (line[0] == ':')
+        {
+            addLabelToArray(&line[1], addr);
+            continue;
+        }
+
+        if (line[0] == '\t')
+        {
+            if (line[1] == ':')
+                continue;
+
+            // Estimate address increment for macro expansion
+            char buf[MAX_LINE];
+            strcpy(buf, &line[1]);
+            char toks[MAX_TOK][MAX_TOK_LEN];
+            int n = splitIntoTokens(buf, toks);
+
+            if (n == 0)
+                continue;
+
+            if (sec == CODE)
+            {
+                char *name = toks[0];
+                
+                // Account for macro expansions
+                if (strcmp(name, "halt") == 0 || strcmp(name, "in") == 0 || 
+                    strcmp(name, "out") == 0 || strcmp(name, "clr") == 0)
+                {
+                    addr += 4;
+                }
+                else if (strcmp(name, "push") == 0 || strcmp(name, "pop") == 0)
+                {
+                    addr += 8;
+                }
+                else if (strcmp(name, "ld") == 0)
+                {
+                    addr += 52; // 13 instructions * 4 bytes
+                }
+                else
+                {
+                    addr += 4; // Regular instruction
+                }
+            }
+            else if (sec == DATA)
+            {
+                addr += 4;
+            }
+        }
+    }
+}
+
+void firstPass(FILE *in, FILE *mid)
+{
+    inFirst=1;
+    char line[MAX_LINE];
+    Section sec = NONE;
+    Section lastWritten = NONE;
+    uint64_t addr = CODE_START;
+
+    while (fgets(line, sizeof(line), in))
+    {
+        cleanLine(line);
+
+        if (line[0] == '\0')
+            continue;
+
+        if (strcmp(line, ".code") == 0)
+        {
+            sec = CODE;
+            if (lastWritten != CODE)
             {
                 fprintf(mid, ".code\n");
-                last = CODE;
+                lastWritten = CODE;
             }
             continue;
         }
@@ -398,17 +520,17 @@ void firstPass(FILE *in, FILE *mid)
         if (strcmp(line, ".data") == 0)
         {
             sec = DATA;
-            if (last != DATA)
+            if (lastWritten != DATA)
             {
                 fprintf(mid, ".data\n");
-                last = DATA;
+                lastWritten = DATA;
             }
             continue;
         }
 
         if (line[0] == ':')
         {
-            addLabelToArray(&line[1], addr);
+            // Labels already collected, skip
             continue;
         }
 
@@ -708,9 +830,10 @@ void writeDataValue(FILE *out, char *line)
     }
 
     uint64_t val = convertToNumber(buf);
+    uint32_t val32 = (uint32_t)val;
 
     // write as-is (native endianness)
-    fwrite(&val, 8, 1, out);
+    fwrite(&val32, 4, 1, out);
 }
 
 void secondPass(FILE *mid, FILE *out)
@@ -776,6 +899,16 @@ int testmain(int argc, char **argv)
         return 1;
     }
 
+    // First, collect all labels
+    collectLabels(fIn);
+    if(hadError){
+        fclose(fIn);
+        return 1;
+    }
+    
+    // Rewind to beginning for actual first pass
+    fseek(fIn, 0, SEEK_SET);
+
     FILE *fMid = fopen(argv[2], "w+");
     if (!fMid)
     {
@@ -786,6 +919,8 @@ int testmain(int argc, char **argv)
 
     firstPass(fIn, fMid);
     if(hadError){
+        fclose(fIn);
+        fclose(fMid);
         return 1;
     }
     fclose(fIn);
@@ -801,6 +936,8 @@ int testmain(int argc, char **argv)
 
     secondPass(fMid, fOut);
     if(hadError){
+        fclose(fMid);
+        fclose(fOut);
         return 1;
     }
     fclose(fMid);
