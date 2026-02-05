@@ -1,3 +1,3 @@
 set -e
 
-gcc -Wall -Wextra -std=c11 Assembler.c -lm -o hw3
+gcc -Wall -Wextra -std=c11 Assembler.c AssemblerTest.c -lm -o hw3

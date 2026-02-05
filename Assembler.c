@@ -9,7 +9,7 @@
 #define MAX_TOK_LEN 64
 #define MAX_LABELS 512
 #define CODE_START 0x1000
-#define DATA_START 0x2000
+#define DATA_START 0x1000
 
 typedef enum InstrType
 {
@@ -61,249 +61,317 @@ typedef struct Label
     uint64_t addr;
 } Label;
 
-Label labels[MAX_LABELS];
-int labelCount = 0;
+Label lbls[MAX_LABELS];
+int numLbls = 0;
 
 // add labels, check for duplicates
-void addLabel(const char *name, uint64_t addr)
+void addLabelToArray(const char *lbl, uint64_t addr)
 {
+    // check if label already exists
     int i;
-    for (i = 0; i < labelCount; i++)
+    for (i = 0; i < numLbls; i++)
     {
-        if (strcmp(labels[i].name, name) == 0)
+        if (strcmp(lbls[i].name, lbl) == 0)
         {
-            fprintf(stderr, "Error: duplicate label '%s'\n", name);
+            fprintf(stderr, "Error: duplicate label '%s'\n", lbl);
             exit(1);
         }
     }
+    
     // prevent overflow of label array
-    if (labelCount >= MAX_LABELS)
+    if (numLbls >= MAX_LABELS)
     {
         fprintf(stderr, "Error: too many labels\n");
         exit(1);
     }
     
     // check label name length
-    if (strlen(name) > 255)
+    if (strlen(lbl) > 255)
     {
         fprintf(stderr, "Error: label name too long (max 256 chars)\n");
         exit(1);
     }
     
-    strcpy(labels[labelCount].name, name);
-    labels[labelCount].addr = addr;
-    labelCount++;
+    strcpy(lbls[numLbls].name, lbl);
+    lbls[numLbls].addr = addr;
+    numLbls = numLbls + 1;
 }
 
-uint64_t lookupLabel(const char *name)
+uint64_t findLabelAddress(const char *lbl)
 {
+    // search through all labels
     int i;
-    for (i = 0; i < labelCount; i++)
+    for (i = 0; i < numLbls; i++)
     {
-        if (strcmp(labels[i].name, name) == 0)
+        if (strcmp(lbls[i].name, lbl) == 0)
         {
-            return labels[i].addr;
+            return lbls[i].addr;
         }
     }
-    fprintf(stderr, "Error: undefined label '%s'\n", name);
+    
+    fprintf(stderr, "Error: undefined label '%s'\n", lbl);
     exit(1);
 }
 
 // remove comments and trailing whitespace
-void trim(char *s)
+void cleanLine(char *line)
 {
-    int i;
-    for (i = 0; s[i] != '\0'; i++)
+    // find comment and remove everything after
+    int pos = 0;
+    while (line[pos] != '\0')
     {
-        if (s[i] == ';')
+        if (line[pos] == ';')
         {
-            s[i] = '\0';
+            line[pos] = '\0';
             break;
         }
+        pos = pos + 1;
     }
+    
     // strip newline
-    int len = strlen(s);
-    if (len > 0 && s[len - 1] == '\n')
-        s[len - 1] = '\0';
+    int len = strlen(line);
+    
+    if (len > 0)
+    {
+        if (line[len - 1] == '\n')
+        {
+            line[len - 1] = '\0';
+        }
+    }
 }
 
-int tokenize(char *line, char tok[MAX_TOK][MAX_TOK_LEN])
+int splitIntoTokens(char *line, char toks[MAX_TOK][MAX_TOK_LEN])
 {
-    int n = 0;
+    int cnt = 0;
+    
     // replace punctuation with spaces
-    for (int i = 0; line[i] != '\0'; i++)
+    int i = 0;
+    while (line[i] != '\0')
     {
-        if (line[i] == ',' || line[i] == '(' || line[i] == ')')
+        char ch = line[i];
+        if (ch == ',' || ch == '(' || ch == ')')
         {
             line[i] = ' ';
         }
+        i = i + 1;
     }
 
-    char *p = strtok(line, " \t");
-    while (p != NULL && n < MAX_TOK)
+    // tokenize by spaces
+    char *ptr = strtok(line, " \t");
+    while (ptr != NULL)
     {
-        strcpy(tok[n], p);
-        n++;
-        p = strtok(NULL, " \t");
+        if (cnt >= MAX_TOK)
+        {
+            break;
+        }
+        
+        strcpy(toks[cnt], ptr);
+        cnt++;
+        ptr = strtok(NULL, " \t");
     }
-    return n;
+    
+    return cnt;
 }
 
-int parseReg(const char *s)
+int getRegisterNumber(const char *reg)
 {
-    if (s == NULL || s[0] != 'r')
+    if (reg == NULL)
     {
-        fprintf(stderr, "Error: invalid register format '%s'\n", s ? s : "NULL");
+        fprintf(stderr, "Error: invalid register format '%s'\n", "NULL");
+        exit(1);
+    }
+    
+    // check first character is 'r'
+    if (reg[0] != 'r')
+    {
+        fprintf(stderr, "Error: invalid register format '%s'\n", reg);
         exit(1);
     }
     
     // check if there are digits after 'r'
-    if (s[1] == '\0' || !isdigit(s[1]))
+    if (reg[1] == '\0')
     {
-        fprintf(stderr, "Error: invalid register format '%s'\n", s);
+        fprintf(stderr, "Error: invalid register format '%s'\n", reg);
         exit(1);
     }
     
-    // skip 'r' and get the number
-    int r = atoi(&s[1]);
-    if (r < 0 || r > 31)
+    // check if second character is digit
+    char ch = reg[1];
+    if (ch < '0' || ch > '9')
     {
-        fprintf(stderr, "Error: register out of range (r%d)\n", r);
+        fprintf(stderr, "Error: invalid register format '%s'\n", reg);
         exit(1);
     }
-    return r;
+    
+    // get the number after 'r'
+    int num = atoi(&reg[1]);
+    
+    if (num < 0 || num > 31)
+    {
+        fprintf(stderr, "Error: register out of range (r%d)\n", num);
+        exit(1);
+    }
+    
+    return num;
 }
 
 // check if a literal is negative
-int isNegativeLiteral(const char *s)
+int checkIfNegative(const char *lit)
 {
-    if (s[0] == '-')
+    if (lit[0] == '-')
+    {
         return 1;
+    }
     return 0;
 }
 
-uint64_t parseLiteral(const char *s)
+uint64_t convertToNumber(const char *lit)
 {
-    if (s == NULL)
+    if (lit == NULL)
     {
         fprintf(stderr, "Error: NULL literal\n");
         exit(1);
     }
     
-    if (s[0] == ':')
+    // check if it's a label reference
+    if (lit[0] == ':')
     {
-        return lookupLabel(&s[1]);
+        return findLabelAddress(&lit[1]);
     }
-    return strtoull(s, NULL, 0);
+    
+    // convert string to number
+    uint64_t res = strtoull(lit, NULL, 0);
+    return res;
 }
 
 // expand ld macro into multiple instructions
-void expandld(FILE *out, int rd, uint64_t val)
+void writeLdMacro(FILE *out, int rd, uint64_t val)
 {
+    // clear register first
     fprintf(out, "\txor r%d, r%d, r%d\n", rd, rd, rd);
     
-    // need to load 64 bits in chunks
-    // bits 52-63 (12 bits)
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)((val >> 52) & 0xFFF));
+    // load 64 bits in chunks
+    uint64_t tmp = val;
+    
+    // bits 52-63
+    uint64_t c1 = (tmp >> 52) & 0xFFF;
+    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c1);
     fprintf(out, "\tshftli r%d, 12\n", rd);
     
-    // bits 40-51 (12 bits)
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)((val >> 40) & 0xFFF));
+    // bits 40-51
+    uint64_t c2 = (tmp >> 40) & 0xFFF;
+    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c2);
     fprintf(out, "\tshftli r%d, 12\n", rd);
     
-    // bits 28-39 (12 bits)
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)((val >> 28) & 0xFFF));
+    // bits 28-39
+    uint64_t c3 = (tmp >> 28) & 0xFFF;
+    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c3);
     fprintf(out, "\tshftli r%d, 12\n", rd);
     
-    // bits 16-27 (12 bits)
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)((val >> 16) & 0xFFF));
+    // bits 16-27
+    uint64_t c4 = (tmp >> 16) & 0xFFF;
+    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c4);
     fprintf(out, "\tshftli r%d, 12\n", rd);
     
-    // bits 4-15 (12 bits)
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)((val >> 4) & 0xFFF));
+    // bits 4-15
+    uint64_t c5 = (tmp >> 4) & 0xFFF;
+    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c5);
     fprintf(out, "\tshftli r%d, 4\n", rd);
     
-    // bits 0-3 (4 bits)
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)(val & 0xF));
+    // bits 0-3
+    uint64_t c6 = tmp & 0xF;
+    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c6);
     // no shift after last addi
 }
 
 // validate number of arguments for macros
-void checkMacroArgs(const char *name, int expected, int actual)
+void checkMacroArgumentCount(const char *name, int exp, int act)
 {
-    // subtract 1 for macro name
-    int actualArgs = actual - 1;
+    // substract 1 for macro name
+    int args = act - 1;
     
-    if (actualArgs != expected)
+    if (args != exp)
     {
         fprintf(stderr, "Error: macro '%s' expects %d argument(s), got %d\n", 
-                name, expected, actualArgs);
+                name, exp, args);
         exit(1);
     }
 }
 
 // handle different macro expansions
-int handleMacros(FILE *out, char tok[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *addr)
+int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *addr)
 {
-    // check if it's a macro
-    if (strcmp(tok[0], "halt") == 0)
+    // check which macro it is
+    char *name = toks[0];
+    
+    if (strcmp(name, "halt") == 0)
     {
-        checkMacroArgs("halt", 0, n);
+        checkMacroArgumentCount("halt", 0, n);
         fprintf(out, "\tpriv r0, r0, r0, 0\n");
-        *addr += 4;
+        *addr = *addr + 4;
         return 1;
     }
-    else if (strcmp(tok[0], "in") == 0)
+    
+    if (strcmp(name, "in") == 0)
     {
-        checkMacroArgs("in", 2, n);
-        fprintf(out, "\tpriv %s, %s, r0, 3\n", tok[1], tok[2]);
-        *addr += 4;
+        checkMacroArgumentCount("in", 2, n);
+        fprintf(out, "\tpriv %s, %s, r0, 3\n", toks[1], toks[2]);
+        *addr = *addr + 4;
         return 1;
     }
-    else if (strcmp(tok[0], "out") == 0)
+    
+    if (strcmp(name, "out") == 0)
     {
-        checkMacroArgs("out", 2, n);
-        fprintf(out, "\tpriv %s, %s, r0, 4\n", tok[1], tok[2]);
-        *addr += 4;
+        checkMacroArgumentCount("out", 2, n);
+        fprintf(out, "\tpriv %s, %s, r0, 4\n", toks[1], toks[2]);
+        *addr = *addr + 4;
         return 1;
     }
-    else if (strcmp(tok[0], "clr") == 0)
+    
+    if (strcmp(name, "clr") == 0)
     {
-        checkMacroArgs("clr", 1, n);
-        fprintf(out, "\txor %s, %s, %s\n", tok[1], tok[1], tok[1]);
-        *addr += 4;
+        checkMacroArgumentCount("clr", 1, n);
+        fprintf(out, "\txor %s, %s, %s\n", toks[1], toks[1], toks[1]);
+        *addr = *addr + 4;
         return 1;
     }
-    else if (strcmp(tok[0], "push") == 0)
+    
+    if (strcmp(name, "push") == 0)
     {
-        checkMacroArgs("push", 1, n);
+        checkMacroArgumentCount("push", 1, n);
         fprintf(out, "\tsubi r31, 8\n");
-        fprintf(out, "\tmov (r31)(0), %s\n", tok[1]);
-        *addr += 8;
+        fprintf(out, "\tmov (r31)(0), %s\n", toks[1]);
+        *addr = *addr + 8;
         return 1;
     }
-    else if (strcmp(tok[0], "pop") == 0)
+    
+    if (strcmp(name, "pop") == 0)
     {
-        checkMacroArgs("pop", 1, n);
-        fprintf(out, "\tmov %s, (r31)(0)\n", tok[1]);
+        checkMacroArgumentCount("pop", 1, n);
+        fprintf(out, "\tmov %s, (r31)(0)\n", toks[1]);
         fprintf(out, "\taddi r31, 8\n");
-        *addr += 8;
+        *addr = *addr + 8;
         return 1;
     }
-    else if (strcmp(tok[0], "ld") == 0)
+    
+    if (strcmp(name, "ld") == 0)
     {
-        checkMacroArgs("ld", 2, n);
+        checkMacroArgumentCount("ld", 2, n);
         
         // validate that literal is not negative (unsigned instruction)
-        if (tok[2][0] != ':' && isNegativeLiteral(tok[2]))
+        if (toks[2][0] != ':')
         {
-            fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
-            exit(1);
+            if (checkIfNegative(toks[2]))
+            {
+                fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
+                exit(1);
+            }
         }
         
-        uint64_t val = parseLiteral(tok[2]);
-        expandld(out, parseReg(tok[1]), val);
-        *addr += (4 * 13);
+        uint64_t val = convertToNumber(toks[2]);
+        int reg = getRegisterNumber(toks[1]);
+        writeLdMacro(out, reg, val);
+        *addr = *addr + (4 * 13);
         return 1;
     }
 
@@ -311,208 +379,336 @@ int handleMacros(FILE *out, char tok[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *add
 }
 
 // process a line that starts with tab
-void processTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
+void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
 {
     char buf[MAX_LINE];
-    strcpy(buf, &line[1]); // skip the tab
+    strcpy(buf, &line[1]);
 
     // check if label
     if (buf[0] == ':')
     {
-        addLabel(&buf[1], *addr);
+        addLabelToArray(&buf[1], *addr);
         fprintf(out, "\t%s\n", buf);
         return;
     }
 
-    char original[MAX_LINE];
-    strcpy(original, buf);
+    // save original line
+    char orig[MAX_LINE];
+    strcpy(orig, buf);
 
-    char tok[MAX_TOK][MAX_TOK_LEN];
-    int n = tokenize(buf, tok);
+    char toks[MAX_TOK][MAX_TOK_LEN];
+    int n = splitIntoTokens(buf, toks);
+    
     if (n == 0)
+    {
         return;
+    }
 
     if (sec == CODE)
     {
         // try to handle as macro first
-        if (!handleMacros(out, tok, n, addr))
+        int macro = tryExpandMacro(out, toks, n, addr);
+        
+        if (macro == 0)
         {
             // regular instruction
-            fprintf(out, "\t%s\n", original);
-            *addr += 4;
+            fprintf(out, "\t%s\n", orig);
+            *addr = *addr + 4;
         }
     }
     else if (sec == DATA)
     {
-        fprintf(out, "\t%s\n", original);
-        *addr += 8; // data is 8 bytes
+        fprintf(out, "\t%s\n", orig);
+        *addr = *addr + 8; // data is 8 bytes
     }
 }
 
-void pass1(FILE *in, FILE *out)
+void firstPass(FILE *in, FILE *mid)
 {
     char line[MAX_LINE];
     Section sec = NONE;
     uint64_t codeAddr = CODE_START;
     uint64_t dataAddr = DATA_START;
-    uint64_t *currentAddr = &codeAddr;
+    uint64_t *currAddr = &codeAddr;
 
-    while (fgets(line, sizeof(line), in))
+    while (fgets(line, sizeof(line), in) != NULL)
     {
-        trim(line);
+        cleanLine(line);
+        
+        // skip empty lines
         if (line[0] == '\0' || line[0] == '\n')
+        {
             continue;
+        }
 
         // check for directives
         if (strcmp(line, ".code") == 0)
         {
             sec = CODE;
-            currentAddr = &codeAddr;
-            fprintf(out, ".code\n");
+            currAddr = &codeAddr;
+            fprintf(mid, ".code\n");
             continue;
         }
+        
         if (strcmp(line, ".data") == 0)
         {
             sec = DATA;
-            currentAddr = &dataAddr;
-            fprintf(out, ".data\n");
+            currAddr = &dataAddr;
+            fprintf(mid, ".data\n");
             continue;
         }
 
         // label definition without tab
         if (line[0] == ':')
         {
-            addLabel(&line[1], *currentAddr);
-            fprintf(out, "%s\n", line);
+            addLabelToArray(&line[1], *currAddr);
+            fprintf(mid, "%s\n", line);
             continue;
         }
 
         // instruction or data with tab
         if (line[0] == '\t')
         {
-            processTabLine(out, line, sec, currentAddr);
+            handleTabLine(mid, line, sec, currAddr);
         }
     }
 }
 
 // validate operand count for regular instructions
-void checkInstrArgs(const char *name, int expected, int actual, InstrType type)
+void checkInstructionOperands(const char *name, int exp, int act, InstrType type)
 {
     // substract instr name count
-    int actualOps = actual - 1;
+    int ops = act - 1;
     
     // mov has variable operand count
     if (type == MOV)
     {
-        if (actualOps < 2 || actualOps > 3)
+        if (ops < 2 || ops > 3)
         {
-            fprintf(stderr, "Error: instruction 'mov' expects 2-3 operands, got %d\n", actualOps);
+            fprintf(stderr, "Error: instruction 'mov' expects 2-3 operands, got %d\n", ops);
             exit(1);
         }
         return;
     }
     
     // for other instructions, check exact count
-    if (actualOps != expected)
+    if (ops != exp)
     {
         fprintf(stderr, "Error: instruction '%s' expects %d operand(s), got %d\n", 
-                name, expected, actualOps);
+                name, exp, ops);
         exit(1);
     }
 }
 
 // encode R instruction
-void encodeR(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt)
+void encodeRType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt)
 {
-    *rd = parseReg(tok[1]);
-    *rs = parseReg(tok[2]);
-    *rt = parseReg(tok[3]);
+    int r1 = getRegisterNumber(toks[1]);
+    int r2 = getRegisterNumber(toks[2]);
+    int r3 = getRegisterNumber(toks[3]);
+    
+    *rd = r1;
+    *rs = r2;
+    *rt = r3;
 }
 
 // encode I instruction
-void encodeI(char tok[MAX_TOK][MAX_TOK_LEN], const char *instrName, uint32_t *rd, uint32_t *imm)
+void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *rd, uint32_t *imm)
 {
-    *rd = parseReg(tok[1]);
+    int r = getRegisterNumber(toks[1]);
+    *rd = r;
     
     // check if instruction requires unsigned literal
-    if (strcmp(instrName, "addi") == 0 || strcmp(instrName, "subi") == 0 ||
-        strcmp(instrName, "shftli") == 0 || strcmp(instrName, "shftri") == 0)
+    int uns = 0;
+    
+    if (strcmp(instr, "addi") == 0) uns = 1;
+    if (strcmp(instr, "subi") == 0) uns = 1;
+    if (strcmp(instr, "shftli") == 0) uns = 1;
+    if (strcmp(instr, "shftri") == 0) uns = 1;
+    
+    if (uns)
     {
-        if (tok[2][0] != ':' && isNegativeLiteral(tok[2]))
+        if (toks[2][0] != ':')
         {
-            fprintf(stderr, "Error: unsigned instruction '%s' cannot have negative literal\n", instrName);
-            exit(1);
+            if (checkIfNegative(toks[2]))
+            {
+                fprintf(stderr, "Error: unsigned instruction '%s' cannot have negative literal\n", instr);
+                exit(1);
+            }
         }
     }
     
-    *imm = (uint32_t)parseLiteral(tok[2]);
+    uint64_t val = convertToNumber(toks[2]);
+    
+    // check 12-bit range for literals (not labels)
+    if (toks[2][0] != ':')
+    {
+        if (uns)
+        {
+            // unsigned: 0 to 4095
+            if (val > 4095)
+            {
+                fprintf(stderr, "Error: literal out of range for instruction '%s' (max 4095)\n", instr);
+                exit(1);
+            }
+        }
+        else
+        {
+            // signed: -2048 to 2047
+            int64_t sval = (int64_t)val;
+            if (sval < -2048 || sval > 2047)
+            {
+                fprintf(stderr, "Error: literal out of range for instruction '%s' (-2048 to 2047)\n", instr);
+                exit(1);
+            }
+        }
+    }
+    
+    *imm = (uint32_t)val;
 }
 
 // encode branch instruction
-void encodeBranch(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *rd, uint32_t *imm)
+void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *rd, uint32_t *imm)
 {
-    // changes opcodes based on input
-    if (strcmp(tok[0], "brr") == 0 && tok[1][0] != 'r')
+    if (strcmp(toks[0], "brr") == 0 && toks[1][0] != 'r')
     {
         *op = 0x0a;
         // brr with literal can be signed
-        *imm = (uint32_t)parseLiteral(tok[1]);
+        uint64_t val = convertToNumber(toks[1]);
+        
+        // check 12-bit range for literals (not labels)
+        if (toks[1][0] != ':')
+        {
+            int64_t sval = (int64_t)val;
+            if (sval < -2048 || sval > 2047)
+            {
+                fprintf(stderr, "Error: literal out of range for brr (-2048 to 2047)\n");
+                exit(1);
+            }
+        }
+        
+        *imm = (uint32_t)val;
     }
     else
     {
-        *rd = parseReg(tok[1]);
+        int r = getRegisterNumber(toks[1]);
+        *rd = r;
     }
 }
 
 // encode privileged instruction
-void encodePriv(char tok[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt, uint32_t *imm)
+void encodePrivType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt, uint32_t *imm)
 {
-    *rd = parseReg(tok[1]);
-    *rs = parseReg(tok[2]);
-    *rt = parseReg(tok[3]);
-    *imm = (uint32_t)parseLiteral(tok[4]);
+    int r1 = getRegisterNumber(toks[1]);
+    int r2 = getRegisterNumber(toks[2]);
+    int r3 = getRegisterNumber(toks[3]);
+    uint64_t val = convertToNumber(toks[4]);
+    
+    // check 12-bit range for literals (not labels)
+    if (toks[4][0] != ':')
+    {
+        // unsigned: 0 to 4095
+        if (val > 4095)
+        {
+            fprintf(stderr, "Error: literal out of range for priv (max 4095)\n");
+            exit(1);
+        }
+    }
+    
+    *rd = r1;
+    *rs = r2;
+    *rt = r3;
+    *imm = (uint32_t)val;
 }
 
 // encode mov instruction with different formats
-void encodeMov(char tok[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_t *rd, uint32_t *rs, uint32_t *imm)
+void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_t *rd, uint32_t *rs, uint32_t *imm)
 {
     // format: mov rd, rs (opcode 0x11)
-    if (n == 3 && tok[1][0] == 'r' && tok[2][0] == 'r')
+    if (n == 3 && toks[1][0] == 'r' && toks[2][0] == 'r')
     {
         *op = 0x11;
-        *rd = parseReg(tok[1]);
-        *rs = parseReg(tok[2]);
+        int r1 = getRegisterNumber(toks[1]);
+        int r2 = getRegisterNumber(toks[2]);
+        *rd = r1;
+        *rs = r2;
     }
     // format: mov rd, L (opcode 0x12) - unsigned literal
-    else if (n == 3 && tok[1][0] == 'r' && tok[2][0] != 'r')
+    else if (n == 3 && toks[1][0] == 'r' && toks[2][0] != 'r')
     {
         *op = 0x12;
-        *rd = parseReg(tok[1]);
+        int r1 = getRegisterNumber(toks[1]);
+        *rd = r1;
         
         // unsigned literal check
-        if (tok[2][0] != ':' && isNegativeLiteral(tok[2]))
+        if (toks[2][0] != ':')
         {
-            fprintf(stderr, "Error: 'mov rd, L' cannot have negative literal\n");
-            exit(1);
+            if (checkIfNegative(toks[2]))
+            {
+                fprintf(stderr, "Error: 'mov rd, L' cannot have negative literal\n");
+                exit(1);
+            }
         }
         
-        *imm = (uint32_t)parseLiteral(tok[2]);
+        uint64_t val = convertToNumber(toks[2]);
+        
+        // check 12-bit range for literals (not labels)
+        if (toks[2][0] != ':')
+        {
+            if (val > 4095)
+            {
+                fprintf(stderr, "Error: literal out of range for 'mov rd, L' (max 4095)\n");
+                exit(1);
+            }
+        }
+        
+        *imm = (uint32_t)val;
     }
     // format: mov rd, (rs)(L) (opcode 0x10) - signed literal
-    else if (n == 4 && tok[1][0] == 'r' && tok[2][0] == 'r')
+    else if (n == 4 && toks[1][0] == 'r' && toks[2][0] == 'r')
     {
         *op = 0x10;
-        *rd = parseReg(tok[1]);
-        *rs = parseReg(tok[2]);
-        *imm = (uint32_t)parseLiteral(tok[3]);
+        int r1 = getRegisterNumber(toks[1]);
+        int r2 = getRegisterNumber(toks[2]);
+        uint64_t val = convertToNumber(toks[3]);
+        
+        // check 12-bit range for literals (not labels)
+        if (toks[3][0] != ':')
+        {
+            int64_t sval = (int64_t)val;
+            if (sval < -2048 || sval > 2047)
+            {
+                fprintf(stderr, "Error: literal out of range for 'mov rd, (rs)(L)' (-2048 to 2047)\n");
+                exit(1);
+            }
+        }
+        
+        *rd = r1;
+        *rs = r2;
+        *imm = (uint32_t)val;
     }
     // format: mov (rd)(L), rs (opcode 0x13) - signed literal
-    else if (n == 4 && tok[1][0] == 'r' && tok[2][0] != 'r')
+    else if (n == 4 && toks[1][0] == 'r' && toks[2][0] != 'r')
     {
         *op = 0x13;
-        *rd = parseReg(tok[1]);
-        *imm = (uint32_t)parseLiteral(tok[2]);
-        *rs = parseReg(tok[3]);
+        int r1 = getRegisterNumber(toks[1]);
+        uint64_t val = convertToNumber(toks[2]);
+        int r2 = getRegisterNumber(toks[3]);
+        
+        // check 12-bit range for literals (not labels)
+        if (toks[2][0] != ':')
+        {
+            int64_t sval = (int64_t)val;
+            if (sval < -2048 || sval > 2047)
+            {
+                fprintf(stderr, "Error: literal out of range for 'mov (rd)(L), rs' (-2048 to 2047)\n");
+                exit(1);
+            }
+        }
+        
+        *rd = r1;
+        *imm = (uint32_t)val;
+        *rs = r2;
     }
     else
     {
@@ -522,84 +718,120 @@ void encodeMov(char tok[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_t *rd
 }
 
 // find instruction in table and get type
-InstrType findInstrType(char *name, uint32_t *opcode, int *expectedOps)
+InstrType findInstructionInfo(char *name, uint32_t *op, int *exp)
 {
-    for (int i = 0; i < tableSize; i++)
+    // search through instruction table
+    int i;
+    for (i = 0; i < tableSize; i = i + 1)
     {
-        if (strcmp(name, instrTable[i].name) == 0)
+        if (strcmp(instrTable[i].name, name) == 0)
         {
-            *opcode = instrTable[i].opcode;
-            *expectedOps = instrTable[i].numOps;
+            *op = instrTable[i].opcode;
+            *exp = instrTable[i].numOps;
             return instrTable[i].type;
         }
     }
+    
     fprintf(stderr, "Error: invalid instruction '%s'\n", name);
     exit(1);
 }
 
 // combine fields into 32-bit instruction
-uint32_t buildInstr(uint32_t op, uint32_t rd, uint32_t rs, uint32_t rt, uint32_t imm)
+uint32_t assembleInstruction(uint32_t op, uint32_t rd, uint32_t rs, uint32_t rt, uint32_t imm)
 {
-    uint32_t result = 0;
-    result = result | (op << 26);
-    result = result | ((rd & 0x1F) << 21);
-    result = result | ((rs & 0x1F) << 16);
-    result = result | ((rt & 0x1F) << 11);
-    result = result | (imm & 0x7FF);
-    return result;
+    uint32_t res = 0;
+    
+    // add opcode
+    uint32_t opShift = op << 26;
+    res = res | opShift;
+    
+    // add rd
+    uint32_t rdMask = rd & 0x1F;
+    uint32_t rdShift = rdMask << 21;
+    res = res | rdShift;
+    
+    // add rs
+    uint32_t rsMask = rs & 0x1F;
+    uint32_t rsShift = rsMask << 16;
+    res = res | rsShift;
+    
+    // add rt
+    uint32_t rtMask = rt & 0x1F;
+    uint32_t rtShift = rtMask << 11;
+    res = res | rtShift;
+    
+    // add immediate
+    uint32_t immMask = imm & 0x7FF;
+    res = res | immMask;
+    
+    return res;
 }
 
-uint32_t encode(char tok[MAX_TOK][MAX_TOK_LEN], int n)
+uint32_t convertToMachineCode(char toks[MAX_TOK][MAX_TOK_LEN], int n)
 {
-    uint32_t op = 0, rd = 0, rs = 0, rt = 0, imm = 0;
-    int expectedOps = 0;
+    uint32_t op = 0;
+    uint32_t rd = 0;
+    uint32_t rs = 0;
+    uint32_t rt = 0;
+    uint32_t imm = 0;
+    int exp = 0;
 
     // find instruction type
-    InstrType type = findInstrType(tok[0], &op, &expectedOps);
+    InstrType type = findInstructionInfo(toks[0], &op, &exp);
     
     // validate argument count
-    checkInstrArgs(tok[0], expectedOps, n, type);
+    checkInstructionOperands(toks[0], exp, n, type);
 
     // encode based on type
-    switch (type)
+    if (type == R)
     {
-    case R:
-        encodeR(tok, &rd, &rs, &rt);
-        break;
-    case I:
-        encodeI(tok, tok[0], &rd, &imm);
-        break;
-    case OTHER:
-        rd = parseReg(tok[1]);
-        rs = parseReg(tok[2]);
-        break;
-    case BR:
-        encodeBranch(tok, &op, &rd, &imm);
-        break;
-    case PRIV:
-        encodePriv(tok, &rd, &rs, &rt, &imm);
-        break;
-    case MOV:
-        encodeMov(tok, n, &op, &rd, &rs, &imm);
-        break;
-    case NO_OP:
+        encodeRType(toks, &rd, &rs, &rt);
+    }
+    else if (type == I)
+    {
+        encodeIType(toks, toks[0], &rd, &imm);
+    }
+    else if (type == OTHER)
+    {
+        int r1 = getRegisterNumber(toks[1]);
+        int r2 = getRegisterNumber(toks[2]);
+        rd = r1;
+        rs = r2;
+    }
+    else if (type == BR)
+    {
+        encodeBranchType(toks, &op, &rd, &imm);
+    }
+    else if (type == PRIV)
+    {
+        encodePrivType(toks, &rd, &rs, &rt, &imm);
+    }
+    else if (type == MOV)
+    {
+        encodeMovType(toks, n, &op, &rd, &rs, &imm);
+    }
+    else if (type == NO_OP)
+    {
         // return instruction, nothing to parse
-        break;
-    default:
+    }
+    else
+    {
         fprintf(stderr, "Error: invalid instruction type\n");
         exit(1);
     }
 
-    return buildInstr(op, rd, rs, rt, imm);
+    uint32_t mc = assembleInstruction(op, rd, rs, rt, imm);
+    return mc;
 }
 
 // process code section line in pass2
-void processCode(FILE *out, char *line)
+void writeCodeInstruction(FILE *out, char *line)
 {
     char buf[MAX_LINE];
     strcpy(buf, &line[1]);
-    char tok[MAX_TOK][MAX_TOK_LEN];
-    int n = tokenize(buf, tok);
+    
+    char toks[MAX_TOK][MAX_TOK_LEN];
+    int n = splitIntoTokens(buf, toks);
     
     if (n == 0)
     {
@@ -607,40 +839,53 @@ void processCode(FILE *out, char *line)
         exit(1);
     }
     
-    uint32_t instr = encode(tok, n);
-    fwrite(&instr, 4, 1, out);
+    uint32_t mc = convertToMachineCode(toks, n);
+    
+    // write to binary file
+    fwrite(&mc, 4, 1, out);
 }
 
 // process data section line in pass2
-void processData(FILE *out, char *line)
+void writeDataValue(FILE *out, char *line)
 {
     // validate data is not negative (unsigned)
-    if (isNegativeLiteral(&line[1]))
+    char buf[MAX_LINE];
+    strcpy(buf, &line[1]);
+    
+    if (checkIfNegative(buf))
     {
         fprintf(stderr, "Error: data values must be unsigned\n");
         exit(1);
     }
     
-    uint64_t val = parseLiteral(&line[1]);
+    uint64_t val = convertToNumber(buf);
+    
+    // write to binary file
     fwrite(&val, 8, 1, out);
 }
 
-void pass2(FILE *in, FILE *out)
+void secondPass(FILE *mid, FILE *out)
 {
     char line[MAX_LINE];
     Section sec = NONE;
 
-    while (fgets(line, sizeof(line), in))
+    while (fgets(line, sizeof(line), mid) != NULL)
     {
-        trim(line);
+        cleanLine(line);
+        
         if (line[0] == '\0')
+        {
             continue;
+        }
 
+        // check for code directive
         if (strcmp(line, ".code") == 0)
         {
             sec = CODE;
             continue;
         }
+        
+        // check for data directive
         if (strcmp(line, ".data") == 0)
         {
             sec = DATA;
@@ -649,13 +894,17 @@ void pass2(FILE *in, FILE *out)
 
         // skip labels in pass2
         if (line[0] == ':')
+        {
             continue;
+        }
 
         if (line[0] == '\t')
         {
             // skip labels with tabs
             if (line[1] == ':')
+            {
                 continue;
+            }
             
             if (sec == NONE)
             {
@@ -665,11 +914,11 @@ void pass2(FILE *in, FILE *out)
                 
             if (sec == CODE)
             {
-                processCode(out, line);
+                writeCodeInstruction(out, line);
             }
             else if (sec == DATA)
             {
-                processData(out, line);
+                writeDataValue(out, line);
             }
         }
     }
@@ -679,42 +928,55 @@ int testmain(int argc, char **argv)
 {
     if (argc != 4)
     {
-        fprintf(stderr, "Usage: %s <input.tk> <intermediate.tk> <output.tko>\n", 
-                argc > 0 ? argv[0] : "assembler");
+        fprintf(stderr, "Error: incorrect number of inputs to main");
         return 1;
     }
 
-    FILE *f_in = fopen(argv[1], "r");
-    FILE *f_mid = fopen(argv[2], "w+");
-    FILE *f_out = fopen(argv[3], "wb");
+    FILE *fIn = fopen(argv[1], "r");
+    FILE *fMid = fopen(argv[2], "w+");
+    FILE *fOut = fopen(argv[3], "wb");
 
-    if (!f_in)
+    if (fIn == NULL)
     {
         fprintf(stderr, "Error: cannot open input file '%s'\n", argv[1]);
         return 1;
     }
-    if (!f_mid)
+    
+    if (fMid == NULL)
     {
         fprintf(stderr, "Error: cannot open intermediate file '%s'\n", argv[2]);
-        if (f_in) fclose(f_in);
+        if (fIn != NULL)
+        {
+            fclose(fIn);
+        }
         return 1;
     }
-    if (!f_out)
+    
+    if (fOut == NULL)
     {
         fprintf(stderr, "Error: cannot open output file '%s'\n", argv[3]);
-        if (f_in) fclose(f_in);
-        if (f_mid) fclose(f_mid);
+        if (fIn != NULL)
+        {
+            fclose(fIn);
+        }
+        if (fMid != NULL)
+        {
+            fclose(fMid);
+        }
         return 1;
     }
 
-    pass1(f_in, f_mid);
+    firstPass(fIn, fMid);
+    
     // back to the start for the second pass
-    fseek(f_mid, 0, SEEK_SET);
-    pass2(f_mid, f_out);
+    fseek(fMid, 0, SEEK_SET);
+    
+    secondPass(fMid, fOut);
 
-    fclose(f_in);
-    fclose(f_mid);
-    fclose(f_out);
+    fclose(fIn);
+    fclose(fMid);
+    fclose(fOut);
+    
     return 0;
 }
 
