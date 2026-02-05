@@ -15,7 +15,7 @@
 	shftli r2, 12
 	addi r2, 0
 	shftli r2, 12
-	addi r2, 512
+	addi r2, 256
 	shftli r2, 4
 	addi r2, 0
 	addi r3, 5

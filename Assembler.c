@@ -383,15 +383,14 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     char buf[MAX_LINE];
     strcpy(buf, &line[1]);
 
-    // check if label
+    // check if label - DON'T output it to intermediate!
     if (buf[0] == ':')
     {
         addLabelToArray(&buf[1], *addr);
-        fprintf(out, "\t%s\n", buf);
+        // DO NOT write label to intermediate file
         return;
     }
 
-    // save original line
     char orig[MAX_LINE];
     strcpy(orig, buf);
 
@@ -399,13 +398,10 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     int n = splitIntoTokens(buf, toks);
     
     if (n == 0)
-    {
         return;
-    }
 
     if (sec == CODE)
     {
-        // try to handle as macro first
         int macro = tryExpandMacro(out, toks, n, addr);
         
         if (macro == 0)
@@ -417,8 +413,10 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     }
     else if (sec == DATA)
     {
-        fprintf(out, "\t%s\n", orig);
-        *addr = *addr + 8; // data is 8 bytes
+        // Parse the literal and output as decimal
+        uint64_t val = convertToNumber(orig);
+        fprintf(out, "\t%llu\n", (unsigned long long)val);
+        *addr = *addr + 8;
     }
 }
 
@@ -453,7 +451,6 @@ void firstPass(FILE *in, FILE *mid)
         if (line[0] == ':')
         {
             addLabelToArray(&line[1], addr);
-            fprintf(mid, "%s\n", line);
             continue;
         }
 
@@ -926,7 +923,6 @@ int testmain(int argc, char **argv)
     FILE *fIn = NULL;
     FILE *fMid = NULL;
     FILE *fOut = NULL;
-    int error = 0;
 
     fIn = fopen(argv[1], "r");
     if (!fIn)
@@ -964,6 +960,6 @@ int testmain(int argc, char **argv)
     return 0;
 }
 
-/*int main(int argc, char **argv){
+int main(int argc, char **argv){
     return testmain(argc, argv);
-}*/
+}
