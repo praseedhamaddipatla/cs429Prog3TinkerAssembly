@@ -155,8 +155,10 @@ int splitIntoTokens(char *line, char toks[MAX_TOK][MAX_TOK_LEN])
 
 int getRegisterNumber(const char *tok)
 {
-    if (!tok || tok[0] != 'r') {
+    if (!tok || tok[0] != 'r')
+    {
         fprintf(stderr, "Error: invalid register '%s'\n", tok);
+        hadError = 1;
         exit(1);
     }
 
@@ -164,8 +166,10 @@ int getRegisterNumber(const char *tok)
     long reg = strtol(tok + 1, &end, 10);
 
     // Must consume the entire string and be in range
-    if (*end != '\0' || reg < 0 || reg > 31) {
+    if (*end != '\0' || reg < 0 || reg > 31)
+    {
         fprintf(stderr, "Error: invalid register '%s'\n", tok);
+        hadError = 1;
         exit(1);
     }
 
@@ -305,6 +309,9 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     {
 
         checkMacroArgumentCount("ld", 2, n);
+
+        // Validate register BEFORE checking literal
+        int reg = getRegisterNumber(toks[1]); // This will error if invalid
 
         if (toks[2][0] != ':' && checkIfNegative(toks[2]))
         {
@@ -456,8 +463,9 @@ void collectLabels(FILE *in)
         {
             if (strcmp(line, ".code") == 0)
             {
-                if(sec==NONE){
-                    addr=CODE_START;
+                if (sec == NONE)
+                {
+                    addr = CODE_START;
                 }
                 sec = CODE;
                 continue;
@@ -484,7 +492,27 @@ void collectLabels(FILE *in)
                 hadError = 1;
                 exit(1);
             }
-            addLabelToArray(&line[1], addr);
+
+            // Validate label name - should be alphanumeric or underscore
+            const char *lbl_name = &line[1];
+            if (*lbl_name == '\0') // Empty label name
+            {
+                fprintf(stderr, "Error: empty label name\n");
+                hadError = 1;
+                exit(1);
+            }
+
+            for (const char *p = lbl_name; *p; p++)
+            {
+                if (!isalnum((unsigned char)*p) && *p != '_')
+                {
+                    fprintf(stderr, "Error: invalid label name '%s'\n", line);
+                    hadError = 1;
+                    exit(1);
+                }
+            }
+
+            addLabelToArray(lbl_name, addr);
             continue;
         }
 
@@ -698,6 +726,7 @@ void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *r
     if (toks[2][0] == ':')
     {
         fprintf(stderr, "Error: label not allowed as immediate\n");
+        hadError = 1;
         exit(1);
     }
 
@@ -781,8 +810,12 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
     if (n < 3 || n > 4)
     {
         fprintf(stderr, "Error: invalid mov format\n");
+        hadError = 1;
         exit(1);
     }
+
+    // Validate that register tokens are actually registers
+    // This catches cases like "mov 123, r1" where 123 should be a register
 
     if (n == 3 && toks[1][0] == 'r' && toks[2][0] == 'r')
     {
@@ -812,47 +845,59 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
             exit(1);
         }
 
-        *imm = (uint32_t)(val & 0xFFF); // Changed from 0x7FF to 0xFFF
+        *imm = (uint32_t)(val & 0xFFF);
     }
-    else if (n == 4 && toks[1][0] == 'r' && toks[2][0] == 'r')
+    else if (n == 4)
     {
-        *op = 0x10;
-        *rd = getRegisterNumber(toks[1]);
-        *rs = getRegisterNumber(toks[2]);
-        uint64_t val = convertToNumber(toks[3]);
-
-        if (toks[3][0] != ':')
+        // Check if this is (rd)(imm), rs pattern or rd, (rs)(imm) pattern
+        if (toks[1][0] == 'r' && toks[2][0] == 'r')
         {
-            int64_t sval = (int64_t)val;
-            if (sval < -2048 || sval > 2047)
+            // mov rd, (rs)(imm)
+            *op = 0x10;
+            *rd = getRegisterNumber(toks[1]);
+            *rs = getRegisterNumber(toks[2]);
+            uint64_t val = convertToNumber(toks[3]);
+
+            if (toks[3][0] != ':')
             {
-                fprintf(stderr, "Error: literal out of range\n");
-                hadError = 1;
-                exit(1);
+                int64_t sval = (int64_t)val;
+                if (sval < -2048 || sval > 2047)
+                {
+                    fprintf(stderr, "Error: literal out of range\n");
+                    hadError = 1;
+                    exit(1);
+                }
             }
+
+            *imm = (uint32_t)(val & 0xFFF);
         }
-
-        *imm = (uint32_t)(val & 0xFFF); // Changed: removed llabs, changed from 0x7FF to 0xFFF
-    }
-    else if (n == 4 && toks[1][0] == 'r' && toks[2][0] != 'r')
-    {
-        *op = 0x13;
-        *rd = getRegisterNumber(toks[1]);
-        uint64_t val = convertToNumber(toks[2]);
-        *rs = getRegisterNumber(toks[3]);
-
-        if (toks[2][0] != ':')
+        else if (toks[1][0] == 'r' && toks[3][0] == 'r')
         {
-            int64_t sval = (int64_t)val;
-            if (sval < -2048 || sval > 2047)
-            {
-                fprintf(stderr, "Error: literal out of range\n");
-                hadError = 1;
-                exit(1);
-            }
-        }
+            // mov (rd)(imm), rs
+            *op = 0x13;
+            *rd = getRegisterNumber(toks[1]);
+            uint64_t val = convertToNumber(toks[2]);
+            *rs = getRegisterNumber(toks[3]);
 
-        *imm = (uint32_t)(val & 0xFFF); // Changed: removed llabs, changed from 0x7FF to 0xFFF
+            if (toks[2][0] != ':')
+            {
+                int64_t sval = (int64_t)val;
+                if (sval < -2048 || sval > 2047)
+                {
+                    fprintf(stderr, "Error: literal out of range\n");
+                    hadError = 1;
+                    exit(1);
+                }
+            }
+
+            *imm = (uint32_t)(val & 0xFFF);
+        }
+        else
+        {
+            fprintf(stderr, "Error: invalid mov format\n");
+            hadError = 1;
+            exit(1);
+        }
     }
     else
     {
@@ -902,6 +947,7 @@ uint32_t convertToMachineCode(char toks[MAX_TOK][MAX_TOK_LEN], int n)
     if (n != exp + 1 && type != MOV)
     {
         fprintf(stderr, "Error: wrong number of operands for '%s'\n", toks[0]);
+        hadError = 1;
         exit(1);
     }
 
@@ -1079,7 +1125,7 @@ void secondPass(FILE *mid, FILE *out)
                 writeCodeInstr(out, line);
             else if (sec == DATA)
                 writeDataValue(out, line);
-            
+
             continue;
         }
 
