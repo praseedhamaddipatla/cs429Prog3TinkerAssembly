@@ -638,13 +638,8 @@ void writeCodeInstruction(FILE *out, char *line)
     
     uint32_t mc = convertToMachineCode(toks, n);
     
-    // write in big-endian format (MSB first)
-    unsigned char bytes[4];
-    bytes[0] = (mc >> 24) & 0xFF;  // MSB first
-    bytes[1] = (mc >> 16) & 0xFF;
-    bytes[2] = (mc >> 8) & 0xFF;
-    bytes[3] = mc & 0xFF;           // LSB last
-    fwrite(bytes, 1, 4, out);
+    // write as-is (native endianness)
+    fwrite(&mc, 4, 1, out);
 }
 
 void writeDataValue(FILE *out, char *line)
@@ -660,14 +655,8 @@ void writeDataValue(FILE *out, char *line)
     
     uint64_t val = convertToNumber(buf);
     
-    // write in big-endian format (MSB first)
-    unsigned char bytes[8];
-    int i;
-    for (i = 0; i < 8; i++)
-    {
-        bytes[i] = (val >> (56 - i * 8)) & 0xFF;
-    }
-    fwrite(bytes, 1, 8, out);
+    // write as-is (native endianness)
+    fwrite(&val, 8, 1, out);
 }
 
 void secondPass(FILE *mid, FILE *out)
@@ -739,12 +728,8 @@ int testmain(int argc, char **argv)
         return 1;
     }
 
-    // Pass1 - expand macros and resolve labels
-    // If this fails (exit(1)), files are left as-is
     firstPass(fIn, fMid);
     fclose(fIn);
-    
-    // Rewind for pass2
     fseek(fMid, 0, SEEK_SET);
 
     FILE *fOut = fopen(argv[3], "wb");
@@ -755,10 +740,7 @@ int testmain(int argc, char **argv)
         return 1;
     }
 
-    // Pass2 - generate binary
-    // If this fails (exit(1)), files are left as-is
     secondPass(fMid, fOut);
-    
     fclose(fMid);
     fclose(fOut);
 
