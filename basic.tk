@@ -1,0 +1,17 @@
+.code
+	add      r0,         r21,    r1
+	push r0
+	addi r0,4095
+	mov r0,(r1)(-2048)
+	mov r0,(r1)(2047)
+	pop r0
+	in r0,r1
+.code
+	out r1,r0
+	ld r0,      :L0
+.data
+	322834289
+.code
+:L0
+.code
+	brr 128
