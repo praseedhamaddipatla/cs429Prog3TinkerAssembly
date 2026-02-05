@@ -328,7 +328,6 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
             exit(1);
         }
 
-        int reg = getRegisterNumber(toks[1]);
         writeLdMacro(out, reg, val);
         *addr += 52; // 13 instructions * 4 bytes
         return 1;
