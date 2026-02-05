@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <errno.h>
+
 
 #define MAX_LINE 512
 #define MAX_TOK 8
@@ -155,7 +157,7 @@ int splitIntoTokens(char *line, char toks[MAX_TOK][MAX_TOK_LEN])
 
 int getRegisterNumber(const char *reg)
 {
-    if (!reg || reg[0] != 'r' || !isdigit(reg[1]) || reg[2] && !isdigit(reg[2]))
+    if (!reg || reg[0] != 'r' || !isdigit(reg[1]) || (reg[2] && !isdigit(reg[2])))
         goto bad;
 
     int num = atoi(&reg[1]);
@@ -177,21 +179,27 @@ int checkIfNegative(const char *lit)
 
 uint64_t convertToNumber(const char *lit)
 {
-
-    if (lit == NULL)
+    if (lit == NULL || *lit == '\0')
     {
-        fprintf(stderr, "Error: NULL literal\n");
+        fprintf(stderr, "Error: empty literal\n");
         hadError = 1;
         exit(1);
     }
 
     if (lit[0] == ':')
+        return findLabelAddress(&lit[1]);
+
+    errno = 0;
+    char *end;
+    uint64_t result = strtoull(lit, &end, 0);
+
+    if (errno == ERANGE || *end != '\0')
     {
-        uint64_t addr = findLabelAddress(&lit[1]);
-        return addr;
+        fprintf(stderr, "Error: invalid or overflow literal '%s'\n", lit);
+        hadError = 1;
+        exit(1);
     }
 
-    uint64_t result = strtoull(lit, NULL, 0);
     return result;
 }
 
@@ -292,25 +300,20 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
 
         checkMacroArgumentCount("ld", 2, n);
 
-        if (toks[2][0] != ':' && checkIfNegative(toks[2]))
-        {
-            fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
-            hadError = 1;
-            exit(1);
-        }
+        checkMacroArgumentCount("ld", 2, n);
 
-        uint64_t val = convertToNumber(toks[2]);
-        if (toks[2][0] != ':' && val > UINT64_MAX)
-        {
-            fprintf(stderr, "Error: ld literal overflow\n");
-            hadError = 1;
-            exit(1);
-        }
+    if (toks[2][0] != ':' && checkIfNegative(toks[2]))
+    {
+        fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
+        hadError = 1;
+        exit(1);
+    }
 
-        int reg = getRegisterNumber(toks[1]);
-        writeLdMacro(out, reg, val);
-        *addr += 52; // 13 instructions * 4 bytes
-        return 1;
+    uint64_t val = convertToNumber(toks[2]);
+    int reg = getRegisterNumber(toks[1]);
+    writeLdMacro(out, reg, val);
+    *addr += 52;
+    return 1;
     }
 
     return 0;
@@ -318,54 +321,46 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
 
 void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
 {
-    // Special handling for mov instruction which needs parentheses reconstructed
     if (strcmp(toks[0], "mov") == 0)
     {
         fprintf(out, "\t%s ", toks[0]);
 
-        // Pattern detection based on number of tokens
         if (n == 3)
         {
-            // mov rd, rs (2 operands after splitting)
             fprintf(out, "%s, %s\n", toks[1], toks[2]);
         }
         else if (n == 4)
         {
-            // Either: mov (rd)(imm), rs OR mov rd, (rs)(imm) OR mov rd, imm
-            // Check if token 1 is a register and token 2 is a number (could be negative)
-            int tok1_is_reg = (toks[1][0] == 'r');
-            int tok2_is_num = (toks[2][0] == '-' || isdigit(toks[2][0]) || toks[2][0] == ':');
-
-            if (tok1_is_reg && tok2_is_num)
+            if (toks[1][0] == 'r' && toks[2][0] != 'r')
             {
-                // mov rd, imm (but shouldn't be 4 tokens... this is mov rd, rs, imm which is invalid for output)
-                // Actually this is: mov (rd)(imm), rs pattern split into: mov, rd, imm, rs
-                fprintf(out, "(%s)(%s), %s\n", toks[1], toks[2], toks[3]);
+                uint64_t val = convertToNumber(toks[2]);
+                fprintf(out, "(%s)(%lld), %s\n",
+                        toks[1], (long long)(int64_t)val, toks[3]);
             }
             else
             {
-                // mov rd, (rs)(imm) pattern split into: mov, rd, rs, imm
-                uint64_t val = (toks[3][0] == ':') ? findLabelAddress(&toks[3][1]) : strtoull(toks[3], NULL, 0);
-                fprintf(out, "%s, (%s)(%lld)\n", toks[1], toks[2], (long long)(int64_t)val);
+                uint64_t val = convertToNumber(toks[3]);
+                fprintf(out, "%s, (%s)(%lld)\n",
+                        toks[1], toks[2], (long long)(int64_t)val);
             }
         }
         else if (n == 5)
         {
-            // mov (rd)(imm1), (rs)(imm2) pattern split into: mov, rd, imm1, rs, imm2
-            uint64_t val1 = (toks[2][0] == ':') ? findLabelAddress(&toks[2][1]) : strtoull(toks[2], NULL, 0);
-            uint64_t val2 = (toks[4][0] == ':') ? findLabelAddress(&toks[4][1]) : strtoull(toks[4], NULL, 0);
-            fprintf(out, "(%s)(%lld), (%s)(%lld)\n", toks[1], (long long)(int64_t)val1, toks[3], (long long)(int64_t)val2);
+            uint64_t v1 = convertToNumber(toks[2]);
+            uint64_t v2 = convertToNumber(toks[4]);
+            fprintf(out, "(%s)(%lld), (%s)(%lld)\n",
+                    toks[1], (long long)(int64_t)v1,
+                    toks[3], (long long)(int64_t)v2);
         }
         else
         {
-            fprintf(stderr, "Error: unexpected mov token count %d\n", n);
+            fprintf(stderr, "Error: invalid mov format\n");
             hadError = 1;
             exit(1);
         }
     }
     else
     {
-        // Non-mov instructions - handle normally
         fprintf(out, "\t%s", toks[0]);
         for (int i = 1; i < n; i++)
         {
@@ -386,14 +381,27 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
 
 void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
 {
+    if (sec == CODE && strstr(line, "mov"))
+    {
+        int open = 0;
+        for (int i = 0; line[i]; i++)
+        {
+            if (line[i] == '(') open++;
+            if (line[i] == ')') open--;
+        }
+        if (open != 0)
+        {
+            fprintf(stderr, "Error: unmatched parentheses in mov\n");
+            hadError = 1;
+            exit(1);
+        }
+    }
+
     char buf[MAX_LINE];
     strcpy(buf, &line[1]);
 
-    // labels don't go to intermediate
     if (buf[0] == ':')
-    {
         return;
-    }
 
     char orig[MAX_LINE];
     strcpy(orig, buf);
@@ -402,9 +410,7 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     int n = splitIntoTokens(buf, toks);
 
     if (n == 0)
-    {
         return;
-    }
 
     if (sec == CODE)
     {
@@ -439,13 +445,6 @@ void collectLabels(FILE *in)
             continue;
         }
 
-        if (strcmp(line, ".code") == 0 && line[0] == '.')
-
-        {
-            sec = CODE;
-            continue;
-        }
-
         if (strncmp(line, ".code", 5) == 0 && strcmp(line, ".code") != 0)
         {
             fprintf(stderr, "Error: invalid directive '%s'\n", line);
@@ -454,8 +453,9 @@ void collectLabels(FILE *in)
         }
 
         if (strcmp(line, ".code") == 0 && line[0] == '.')
+
         {
-            sec = DATA;
+            sec = CODE;
             continue;
         }
 
@@ -464,6 +464,12 @@ void collectLabels(FILE *in)
             fprintf(stderr, "Error: invalid directive '%s'\n", line);
             hadError = 1;
             exit(1);
+        }
+
+        if (strcmp(line, ".data") == 0 && line[0] == '.')
+        {
+            sec = DATA;
+            continue;
         }
 
         if (line[0] == ':')
@@ -553,6 +559,13 @@ void firstPass(FILE *in, FILE *mid)
             exit(1);
         }
 
+        if (strncmp(line, ".code", 5) == 0 && strcmp(line, ".code") != 0)
+        {
+            fprintf(stderr, "Error: invalid directive '%s'\n", line);
+            hadError = 1;
+            exit(1);
+        }
+
         if (strcmp(line, ".code") == 0 && line[0] == '.')
 
         {
@@ -565,7 +578,7 @@ void firstPass(FILE *in, FILE *mid)
             continue;
         }
 
-        if (strncmp(line, ".code", 5) == 0 && strcmp(line, ".code") != 0)
+        if (strncmp(line, ".data", 5) == 0 && strcmp(line, ".data") != 0)
         {
             fprintf(stderr, "Error: invalid directive '%s'\n", line);
             hadError = 1;
@@ -583,13 +596,6 @@ void firstPass(FILE *in, FILE *mid)
             }
 
             continue;
-        }
-
-        if (strncmp(line, ".data", 5) == 0 && strcmp(line, ".data") != 0)
-        {
-            fprintf(stderr, "Error: invalid directive '%s'\n", line);
-            hadError = 1;
-            exit(1);
         }
 
         if (line[0] == ':')
@@ -918,6 +924,14 @@ void writeDataValue(FILE *out, char *line)
     }
 
     uint64_t val = convertToNumber(buf);
+
+    if (buf[0] == '-' || (int64_t)val < 0)
+    {
+        fprintf(stderr, "Error: data values must be unsigned\n");
+        hadError = 1;
+        exit(1);
+    }
+
     uint32_t v = (uint32_t)val;
 
     // Write in little-endian byte order
