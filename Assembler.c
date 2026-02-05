@@ -89,11 +89,13 @@ void addLabelToArray(const char *lbl, uint64_t addr)
 
 uint64_t findLabelAddress(const char *lbl)
 {
+
     int i;
     for (i = 0; i < numLbls; i++)
     {
         if (strcmp(lbls[i].name, lbl) == 0)
         {
+
             return lbls[i].addr;
         }
     }
@@ -186,6 +188,7 @@ int checkIfNegative(const char *lit)
 
 uint64_t convertToNumber(const char *lit)
 {
+
     if (lit == NULL)
     {
         fprintf(stderr, "Error: NULL literal\n");
@@ -195,15 +198,18 @@ uint64_t convertToNumber(const char *lit)
 
     if (lit[0] == ':')
     {
-        return findLabelAddress(&lit[1]);
+        uint64_t addr = findLabelAddress(&lit[1]);
+        return addr;
     }
 
-    return strtoull(lit, NULL, 0);
+    uint64_t result = strtoull(lit, NULL, 0);
+    return result;
 }
 
 // expand ld macro
 void writeLdMacro(FILE *out, int rd, uint64_t val)
 {
+
     fprintf(out, "\txor r%d, r%d, r%d\n", rd, rd, rd);
 
     fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)((val >> 52) & 0xFFF));
@@ -292,6 +298,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
 
     if (strcmp(name, "ld") == 0)
     {
+
         checkMacroArgumentCount("ld", 2, n);
 
         if (toks[2][0] != ':' && checkIfNegative(toks[2]))
@@ -317,7 +324,7 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
     if (strcmp(toks[0], "mov") == 0)
     {
         fprintf(out, "\t%s ", toks[0]);
-        
+
         // Pattern detection based on number of tokens
         if (n == 3)
         {
@@ -330,7 +337,7 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
             // Check if token 1 is a register and token 2 is a number (could be negative)
             int tok1_is_reg = (toks[1][0] == 'r');
             int tok2_is_num = (toks[2][0] == '-' || isdigit(toks[2][0]) || toks[2][0] == ':');
-            
+
             if (tok1_is_reg && tok2_is_num)
             {
                 // mov rd, imm (but shouldn't be 4 tokens... this is mov rd, rs, imm which is invalid for output)
@@ -397,7 +404,9 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     int n = splitIntoTokens(buf, toks);
 
     if (n == 0)
+    {
         return;
+    }
 
     if (sec == CODE)
     {
@@ -420,13 +429,17 @@ void collectLabels(FILE *in)
     char line[MAX_LINE];
     Section sec = NONE;
     uint64_t addr = CODE_START;
+    int lineNum = 0;
 
     while (fgets(line, sizeof(line), in))
     {
+        lineNum++;
         cleanLine(line);
 
         if (line[0] == '\0')
+        {
             continue;
+        }
 
         if (strcmp(line, ".code") == 0)
         {
@@ -442,6 +455,7 @@ void collectLabels(FILE *in)
 
         if (line[0] == ':')
         {
+
             addLabelToArray(&line[1], addr);
             continue;
         }
@@ -449,7 +463,9 @@ void collectLabels(FILE *in)
         if (line[0] == '\t')
         {
             if (line[1] == ':')
+            {
                 continue;
+            }
 
             // Estimate address increment for macro expansion
             char buf[MAX_LINE];
@@ -458,14 +474,16 @@ void collectLabels(FILE *in)
             int n = splitIntoTokens(buf, toks);
 
             if (n == 0)
+            {
                 continue;
+            }
 
             if (sec == CODE)
             {
                 char *name = toks[0];
-                
+
                 // Account for macro expansions
-                if (strcmp(name, "halt") == 0 || strcmp(name, "in") == 0 || 
+                if (strcmp(name, "halt") == 0 || strcmp(name, "in") == 0 ||
                     strcmp(name, "out") == 0 || strcmp(name, "clr") == 0)
                 {
                     addr += 4;
@@ -483,7 +501,7 @@ void collectLabels(FILE *in)
                     addr += 4; // Regular instruction
                 }
             }
-            else if (sec == DATA)
+            if (sec == DATA)
             {
                 addr += 4;
             }
@@ -493,18 +511,23 @@ void collectLabels(FILE *in)
 
 void firstPass(FILE *in, FILE *mid)
 {
-    inFirst=1;
+
+    inFirst = 1;
     char line[MAX_LINE];
     Section sec = NONE;
     Section lastWritten = NONE;
     uint64_t addr = CODE_START;
+    int lineNum = 0;
 
     while (fgets(line, sizeof(line), in))
     {
+        lineNum++;
         cleanLine(line);
 
         if (line[0] == '\0')
+        {
             continue;
+        }
 
         if (strcmp(line, ".code") == 0)
         {
@@ -525,6 +548,7 @@ void firstPass(FILE *in, FILE *mid)
                 fprintf(mid, ".data\n");
                 lastWritten = DATA;
             }
+
             continue;
         }
 
@@ -539,7 +563,7 @@ void firstPass(FILE *in, FILE *mid)
             handleTabLine(mid, line, sec, &addr);
         }
     }
-    inFirst=0;
+    inFirst = 0;
 }
 
 void checkInstructionOperands(const char *name, int exp, int act, InstrType type)
@@ -796,7 +820,7 @@ uint32_t convertToMachineCode(char toks[MAX_TOK][MAX_TOK_LEN], int n)
     return assembleInstruction(op, rd, rs, rt, imm);
 }
 
-void writeCodeInstruction(FILE *out, char *line)
+void writeCodeInstr(FILE *out, char *line)
 {
     char buf[MAX_LINE];
     strcpy(buf, &line[1]);
@@ -813,8 +837,14 @@ void writeCodeInstruction(FILE *out, char *line)
 
     uint32_t mc = convertToMachineCode(toks, n);
 
-    // write as-is (native endianness)
-    fwrite(&mc, 4, 1, out);
+    // Write in little-endian byte order
+    unsigned char bytes[4];
+    bytes[0] = mc & 0xFF;
+    bytes[1] = (mc >> 8) & 0xFF;
+    bytes[2] = (mc >> 16) & 0xFF;
+    bytes[3] = (mc >> 24) & 0xFF;
+
+    fwrite(bytes, 4, 1, out);
 }
 
 void writeDataValue(FILE *out, char *line)
@@ -830,15 +860,21 @@ void writeDataValue(FILE *out, char *line)
     }
 
     uint64_t val = convertToNumber(buf);
-    uint32_t val32 = (uint32_t)val;
+    uint32_t v = (uint32_t)val;
 
-    // write as-is (native endianness)
-    fwrite(&val32, 4, 1, out);
+    // Write in little-endian byte order
+    unsigned char bytes[4];
+    bytes[0] = v & 0xFF;
+    bytes[1] = (v >> 8) & 0xFF;
+    bytes[2] = (v >> 16) & 0xFF;
+    bytes[3] = (v >> 24) & 0xFF;
+
+    fwrite(bytes, 4, 1, out);
 }
 
 void secondPass(FILE *mid, FILE *out)
 {
-    inFirst=0;
+    inFirst = 0;
     char line[MAX_LINE];
     Section sec = NONE;
 
@@ -877,7 +913,7 @@ void secondPass(FILE *mid, FILE *out)
             }
 
             if (sec == CODE)
-                writeCodeInstruction(out, line);
+                writeCodeInstr(out, line);
             else if (sec == DATA)
                 writeDataValue(out, line);
         }
@@ -901,11 +937,12 @@ int testmain(int argc, char **argv)
 
     // First, collect all labels
     collectLabels(fIn);
-    if(hadError){
+    if (hadError)
+    {
         fclose(fIn);
         return 1;
     }
-    
+
     // Rewind to beginning for actual first pass
     fseek(fIn, 0, SEEK_SET);
 
@@ -918,7 +955,8 @@ int testmain(int argc, char **argv)
     }
 
     firstPass(fIn, fMid);
-    if(hadError){
+    if (hadError)
+    {
         fclose(fIn);
         fclose(fMid);
         return 1;
@@ -935,7 +973,8 @@ int testmain(int argc, char **argv)
     }
 
     secondPass(fMid, fOut);
-    if(hadError){
+    if (hadError)
+    {
         fclose(fMid);
         fclose(fOut);
         return 1;
