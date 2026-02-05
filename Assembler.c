@@ -157,7 +157,21 @@ int splitIntoTokens(char *line, char toks[MAX_TOK][MAX_TOK_LEN])
 
 int getRegisterNumber(const char *reg)
 {
-    if (!reg || reg[0] != 'r' || !isdigit(reg[1]) || (reg[2] && !isdigit(reg[2])))
+    // FIX: Check for invalid register formats like r00, r01, etc.
+    if (!reg || reg[0] != 'r')
+        goto bad;
+    
+    if (!isdigit(reg[1]))
+        goto bad;
+    
+    // FIX: Reject registers with leading zeros (r00, r01, etc.)
+    if (reg[1] == '0' && reg[2] != '\0')
+        goto bad;
+    
+    if (reg[2] != '\0' && !isdigit(reg[2]))
+        goto bad;
+    
+    if (reg[3] != '\0')
         goto bad;
 
     int num = atoi(&reg[1]);
@@ -474,12 +488,18 @@ void collectLabels(FILE *in)
 
         if (line[0] == ':')
         {
-            if (strchr(line, '\t'))
+            // FIX: Check for any non-whitespace after label (space or tab)
+            int i = 1;
+            while (line[i] != '\0' && line[i] != ' ' && line[i] != '\t')
+                i++;
+            
+            if (line[i] != '\0')
             {
                 fprintf(stderr, "Error: label must be alone on its line\n");
                 hadError = 1;
                 exit(1);
             }
+            
             addLabelToArray(&line[1], addr);
             continue;
         }
@@ -529,6 +549,13 @@ void collectLabels(FILE *in)
             {
                 addr += 4;
             }
+        }
+        // FIX: Check for lines that don't start with recognized patterns
+        else
+        {
+            fprintf(stderr, "Error: invalid line format\n");
+            hadError = 1;
+            exit(1);
         }
     }
 }
@@ -607,6 +634,13 @@ void firstPass(FILE *in, FILE *mid)
         if (line[0] == '\t')
         {
             handleTabLine(mid, line, sec, &addr);
+        }
+        // FIX: Check for lines that don't start with recognized patterns
+        else
+        {
+            fprintf(stderr, "Error: invalid line format\n");
+            hadError = 1;
+            exit(1);
         }
     }
     inFirst = 0;
@@ -735,6 +769,14 @@ void encodePrivType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs,
     if (toks[4][0] != ':' && val > 4095)
     {
         fprintf(stderr, "Error: literal out of range\n");
+        hadError = 1;
+        exit(1);
+    }
+
+    // FIX: Validate that the priv instruction L field is one of {0, 3, 4}
+    if (toks[4][0] != ':' && val != 0 && val != 3 && val != 4)
+    {
+        fprintf(stderr, "Error: invalid priv instruction code\n");
         hadError = 1;
         exit(1);
     }
