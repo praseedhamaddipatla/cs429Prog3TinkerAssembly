@@ -248,39 +248,39 @@ uint64_t convertToNumber(const char *lit)
 void writeLdMacro(FILE *out, int rd, uint64_t val)
 {
     // clear register first
-    fprintf(out, "\txor r%d, r%d, r%d\n", rd, rd, rd);
+    fprintf(out, "\txor r%d r%d r%d\n", rd, rd, rd);
     
     // load 64 bits in chunks
     uint64_t tmp = val;
     
     // bits 52-63
     uint64_t c1 = (tmp >> 52) & 0xFFF;
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c1);
-    fprintf(out, "\tshftli r%d, 12\n", rd);
+    fprintf(out, "\taddi r%d %llu\n", rd, (unsigned long long)c1);
+    fprintf(out, "\tshftli r%d 12\n", rd);
     
     // bits 40-51
     uint64_t c2 = (tmp >> 40) & 0xFFF;
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c2);
-    fprintf(out, "\tshftli r%d, 12\n", rd);
+    fprintf(out, "\taddi r%d %llu\n", rd, (unsigned long long)c2);
+    fprintf(out, "\tshftli r%d 12\n", rd);
     
     // bits 28-39
     uint64_t c3 = (tmp >> 28) & 0xFFF;
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c3);
-    fprintf(out, "\tshftli r%d, 12\n", rd);
+    fprintf(out, "\taddi r%d %llu\n", rd, (unsigned long long)c3);
+    fprintf(out, "\tshftli r%d 12\n", rd);
     
     // bits 16-27
     uint64_t c4 = (tmp >> 16) & 0xFFF;
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c4);
-    fprintf(out, "\tshftli r%d, 12\n", rd);
+    fprintf(out, "\taddi r%d %llu\n", rd, (unsigned long long)c4);
+    fprintf(out, "\tshftli r%d 12\n", rd);
     
     // bits 4-15
     uint64_t c5 = (tmp >> 4) & 0xFFF;
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c5);
-    fprintf(out, "\tshftli r%d, 4\n", rd);
+    fprintf(out, "\taddi r%d %llu\n", rd, (unsigned long long)c5);
+    fprintf(out, "\tshftli r%d 4\n", rd);
     
     // bits 0-3
     uint64_t c6 = tmp & 0xF;
-    fprintf(out, "\taddi r%d, %llu\n", rd, (unsigned long long)c6);
+    fprintf(out, "\taddi r%d %llu\n", rd, (unsigned long long)c6);
     // no shift after last addi
 }
 
@@ -301,13 +301,12 @@ void checkMacroArgumentCount(const char *name, int exp, int act)
 // handle different macro expansions
 int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *addr)
 {
-    // check which macro it is
     char *name = toks[0];
     
     if (strcmp(name, "halt") == 0)
     {
         checkMacroArgumentCount("halt", 0, n);
-        fprintf(out, "\tpriv r0, r0, r0, 0\n");
+        fprintf(out, "\tpriv r0 r0 r0 0\n");  // spaces, no commas
         *addr = *addr + 4;
         return 1;
     }
@@ -315,7 +314,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "in") == 0)
     {
         checkMacroArgumentCount("in", 2, n);
-        fprintf(out, "\tpriv %s, %s, r0, 3\n", toks[1], toks[2]);
+        fprintf(out, "\tpriv %s %s r0 3\n", toks[1], toks[2]);  // spaces
         *addr = *addr + 4;
         return 1;
     }
@@ -323,7 +322,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "out") == 0)
     {
         checkMacroArgumentCount("out", 2, n);
-        fprintf(out, "\tpriv %s, %s, r0, 4\n", toks[1], toks[2]);
+        fprintf(out, "\tpriv %s %s r0 4\n", toks[1], toks[2]);  // spaces
         *addr = *addr + 4;
         return 1;
     }
@@ -331,7 +330,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "clr") == 0)
     {
         checkMacroArgumentCount("clr", 1, n);
-        fprintf(out, "\txor %s, %s, %s\n", toks[1], toks[1], toks[1]);
+        fprintf(out, "\txor %s %s %s\n", toks[1], toks[1], toks[1]);  // spaces
         *addr = *addr + 4;
         return 1;
     }
@@ -339,8 +338,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "push") == 0)
     {
         checkMacroArgumentCount("push", 1, n);
-        fprintf(out, "\tsubi r31, 8\n");
-        fprintf(out, "\tmov (r31)(0), %s\n", toks[1]);
+        fprintf(out, "\tsubi r31 8\n");  // spaces
+        fprintf(out, "\tmov r31 0 %s\n", toks[1]);  // mov (rd)(L) rs format
         *addr = *addr + 8;
         return 1;
     }
@@ -348,8 +347,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "pop") == 0)
     {
         checkMacroArgumentCount("pop", 1, n);
-        fprintf(out, "\tmov %s, (r31)(0)\n", toks[1]);
-        fprintf(out, "\taddi r31, 8\n");
+        fprintf(out, "\tmov %s r31 0\n", toks[1]);  // mov rd (rs)(L) format
+        fprintf(out, "\taddi r31 8\n");  // spaces
         *addr = *addr + 8;
         return 1;
     }
@@ -358,7 +357,6 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     {
         checkMacroArgumentCount("ld", 2, n);
         
-        // validate that literal is not negative (unsigned instruction)
         if (toks[2][0] != ':')
         {
             if (checkIfNegative(toks[2]))
@@ -375,7 +373,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         return 1;
     }
 
-    return 0; // not a macro
+    return 0; //not a macro
 }
 
 // process a line that starts with tab
@@ -388,7 +386,7 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     if (buf[0] == ':')
     {
         addLabelToArray(&buf[1], *addr);
-        fprintf(out, "\t%s\n", buf);
+        fprintf(out, "%s\n", buf);
         return;
     }
 
@@ -411,8 +409,12 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
         
         if (macro == 0)
         {
-            // regular instruction
-            fprintf(out, "\t%s\n", orig);
+            fprintf(out, "\t%s", toks[0]);
+            for (int i = 1; i < n; i++)
+            {
+                fprintf(out, " %s", toks[i]);
+            }
+            fprintf(out, "\n");
             *addr = *addr + 4;
         }
     }
