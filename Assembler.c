@@ -438,7 +438,39 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     }
     else if (sec == DATA)
     {
-        uint64_t val = convertToNumber(orig);
+        // Validate data value during first pass
+        if (orig[0] == '-')
+        {
+            fprintf(stderr, "Error: data values must be unsigned\n");
+            hadError = 1;
+            exit(1);
+        }
+        
+        // Check for overflow by string length
+        if (strlen(orig) > 20)  // UINT64_MAX is 20 digits
+        {
+            fprintf(stderr, "Error: data value out of range\n");
+            hadError = 1;
+            exit(1);
+        }
+        
+        char *endptr = NULL;
+        uint64_t val = strtoull(orig, &endptr, 0);
+        if (endptr == orig || *endptr != '\0')
+        {
+            fprintf(stderr, "Error: invalid numeric literal '%s'\n", orig);
+            hadError = 1;
+            exit(1);
+        }
+        
+        // Data values must fit in 32 bits for the binary output
+        if (val > UINT32_MAX)
+        {
+            fprintf(stderr, "Error: data value out of range\n");
+            hadError = 1;
+            exit(1);
+        }
+        
         fprintf(out, "\t%llu\n", (unsigned long long)val);
         *addr += 4;
     }
@@ -1019,7 +1051,7 @@ void writeDataValue(FILE *out, char *line)
 
     uint64_t val = convertToNumber(buf);
     
-    // ADDED: Check if the value fits in 32 bits
+    // Data is stored as 32-bit values in the binary
     if (val > UINT32_MAX)
     {
         fprintf(stderr, "Error: data value out of range\n");
