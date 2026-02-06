@@ -1246,16 +1246,6 @@ void validateFile(const char *filename)
             else if (currentMode == 0)
             {
                 // data section - validate unsigned 64-bit integer
-
-                // labels are not allowed in data section
-                if (content[0] == ':')
-                {
-                    fprintf(stderr, "error line %d: labels not allowed in .data section\n", lineNum);
-                    hasError = 1;
-                    fclose(f);
-                    return;
-                }
-
                 // no negative values
                 if (isNegative(content))
                 {
