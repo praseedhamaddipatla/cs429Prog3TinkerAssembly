@@ -41,16 +41,15 @@ char *binaryFile;
 
 void cleanupAndExit()
 {
-    FILE *f1 = fopen(intermediateFile, "w");
-    if (f1)
-        fclose(f1);
+    if (intermediateFile)
+        remove(intermediateFile);
 
-    FILE *f2 = fopen(binaryFile, "w");
-    if (f2)
-        fclose(f2);
+    if (binaryFile)
+        remove(binaryFile);
 
     exit(1);
 }
+
 
 void cleanLine(char *s)
 {
@@ -138,33 +137,57 @@ void firstPass(const char *filename)
 
         if (buffer[0] == ':')
         {
-            const char *name = buffer + 1;
+            int i = 1;
 
             // empty label
-            if (*name == '\0')
+            if (buffer[i] == '\0' || buffer[i] == '\n')
+            {
+                fprintf(stderr, "error: empty label\n");
+                cleanupAndExit();
+            }
+
+            // check for space/tab immediately after ':'
+            if (buffer[i] == ' ' || buffer[i] == '\t')
             {
                 fprintf(stderr, "error: invalid label\n");
                 cleanupAndExit();
             }
 
             // first character must be letter or underscore
-            if (!isalpha((unsigned char)*name) && *name != '_')
+            if (!isalpha((unsigned char)buffer[i]) && buffer[i] != '_')
             {
                 fprintf(stderr, "error: invalid label\n");
                 cleanupAndExit();
             }
 
-            // remaining characters must be alnum or underscore ONLY
-            for (const char *p = name; *p; p++)
+            // consume valid identifier characters
+            int start = i;
+            while (isalnum((unsigned char)buffer[i]) || buffer[i] == '_')
             {
-                if (!isalnum((unsigned char)*p) && *p != '_')
-                {
-                    fprintf(stderr, "error: invalid label\n");
-                    cleanupAndExit();
-                }
+                i++;
             }
 
-            // store label WITH colon (critical!)
+            // must have consumed at least one character
+            if (i == start)
+            {
+                fprintf(stderr, "error: invalid label\n");
+                cleanupAndExit();
+            }
+
+            // skip trailing whitespace
+            while (buffer[i] == ' ' || buffer[i] == '\t')
+            {
+                i++;
+            }
+
+            // after whitespace, only newline or null is allowed
+            if (buffer[i] != '\0' && buffer[i] != '\n')
+            {
+                fprintf(stderr, "error: invalid label\n");
+                cleanupAndExit();
+            }
+
+            // safe to add label
             addLabel(buffer, address);
             continue;
         }
@@ -980,6 +1003,15 @@ void validateFile(const char *filename)
                 return;
             }
 
+            // check for space/tab immediately after ':'
+            if (rawLine[i] == ' ' || rawLine[i] == '\t')
+            {
+                fprintf(stderr, "error line %d: invalid label\n", lineNum);
+                hasError = 1;
+                fclose(f);
+                return;
+            }
+
             // first char must be letter or underscore
             if (!isalpha(rawLine[i]) && rawLine[i] != '_')
             {
@@ -990,12 +1022,28 @@ void validateFile(const char *filename)
             }
 
             // consume valid identifier characters
+            int start = i;
             while (isalnum(rawLine[i]) || rawLine[i] == '_')
             {
                 i++;
             }
 
-            // after identifier, ONLY newline or end is allowed
+            // must have consumed at least one character
+            if (i == start)
+            {
+                fprintf(stderr, "error line %d: invalid label\n", lineNum);
+                hasError = 1;
+                fclose(f);
+                return;
+            }
+
+            // skip trailing whitespace
+            while (rawLine[i] == ' ' || rawLine[i] == '\t')
+            {
+                i++;
+            }
+
+            // after whitespace, ONLY newline or end is allowed
             if (rawLine[i] != '\n' && rawLine[i] != '\0')
             {
                 fprintf(stderr, "error line %d: invalid label\n", lineNum);
