@@ -4,102 +4,73 @@
 #include <stdint.h>
 #include <assert.h>
 
-int getReg(const char *s);                 
-uint64_t toNum(const char *s);                 
-void addLbl(const char *name, uint64_t addr);
-uint64_t findLbl(const char *name);           
-int tokenize(char *line, char tokens[8][64]);  
-int tryMacro(FILE *f, char tokens[8][64], int n, uint64_t *addr);  
-uint32_t toMC(char tokens[8][64], int n);     
-void clean(char *line);
+// assembler functions
+int getRegisterNumber(const char *s);
+uint64_t parseNumber(const char *s);
+void addLabel(const char *name, int addr);
+int findLabel(const char *name);
+int parseCodeLine(char *line, int address);
+int parseDataLine(char *line, int address);
+void cleanLine(char *s);
 
 // helpers for testing
 void resetLabels() {
-    extern int nlbl;  // use assembler's label counter
-    nlbl = 0;
+    extern int numLabels;
+    numLabels = 0;
 }
 
-void test_getReg() {
-    assert(getReg("r0") == 0);
-    assert(getReg("r15") == 15);
-    assert(getReg("r31") == 31);
+void test_getRegisterNumber() {
+    assert(getRegisterNumber("r0") == 0);
+    assert(getRegisterNumber("r15") == 15);
+    assert(getRegisterNumber("r31") == 31);
 }
 
-void test_toNum() {
-    assert(toNum("123") == 123);
-    assert(toNum("0") == 0);
-    assert(toNum("0010") == 10);
+void test_parseNumber() {
+    assert(parseNumber("123") == 123);
+    assert(parseNumber("0") == 0);
+    assert(parseNumber("0010") == 10);
+    assert(parseNumber("0xFF") == 255);
 }
 
 void test_labels() {
     resetLabels();
-    addLbl("start", 0x1000);
-    addLbl("loop", 0x1004);
-    assert(findLbl("start") == 0x1000);
-    assert(findLbl("loop") == 0x1004);
+    addLabel("start", 0x1000);
+    addLabel("loop", 0x1004);
+    assert(findLabel("start") == 0x1000);
+    assert(findLabel("loop") == 0x1004);
+    assert(findLabel("nonexistent") == -1);
 }
 
-void test_tokenize() {
-    char t[8][64];
-    int n = tokenize("mov r1, r2", t);
-    assert(n == 3);
-    assert(strcmp(t[0], "mov") == 0);
-    assert(strcmp(t[1], "r1") == 0);
-    assert(strcmp(t[2], "r2") == 0);
-}
-
-void test_tryMacro() {
-    FILE *f = tmpfile();
-    char t[8][64];
-    uint64_t addr = 0;
-
-    strcpy(t[0], "halt");
-    int matched = tryMacro(f, t, 1, &addr);
-    assert(matched);
-    assert(addr == 4);
-
-    strcpy(t[0], "clr");
-    strcpy(t[1], "r1");
-    matched = tryMacro(f, t, 2, &addr);
-    assert(matched);
-    assert(addr == 8);
-
-    fclose(f);
-}
-
-void test_toMC() {
-    char t[8][64];
-    strcpy(t[0], "add");
-    strcpy(t[1], "r1");
-    strcpy(t[2], "r2");
-    strcpy(t[3], "r3");
-    uint32_t mc = toMC(t, 4);
-    assert(mc != 0);
-
-    strcpy(t[0], "addi");
-    strcpy(t[1], "r1");
-    strcpy(t[2], "10");
-    mc = toMC(t, 3);
-    assert(mc != 0);
-}
-
-void test_clean() {
+void test_cleanLine() {
     char s[128];
     strcpy(s, "mov r1, r2 ; comment\n");
-    clean(s);
-    assert(strcmp(s, "mov r1, r2 ") == 0);
+    cleanLine(s);
+    assert(strcmp(s, "mov r1, r2 ; comment") == 0); // cleanLine removes only newline
+}
+
+void test_parseCodeLine() {
+    char line[128];
+    strcpy(line, "add r1, r2, r3");
+    int addr = parseCodeLine(line, 0x1000);
+    assert(addr > 0); // address advanced
+}
+
+void test_parseDataLine() {
+    char line[128];
+    strcpy(line, "12345");
+    int addr = parseDataLine(line, 0x1000);
+    assert(addr == 0x1000 + 8); // data increments by 8
 }
 
 int main() {
     printf("Running Assembler tests...\n");
 
-    test_getReg();
-    test_toNum();
+    test_getRegisterNumber();
+    test_parseNumber();
     test_labels();
-    test_tokenize();
-    test_tryMacro();
-    test_toMC();
-    test_clean();
+    test_cleanLine();
+    test_parseCodeLine();
+    test_parseDataLine();
 
     printf("All tests passed!\n");
     return 0;
