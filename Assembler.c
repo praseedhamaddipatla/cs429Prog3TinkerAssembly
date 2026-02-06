@@ -914,18 +914,6 @@ void validateMacroArgs(const char *macroName, int expected, int actual)
     }
 }
 
-static int isValidLabelName(const char *s)
-{
-    if (!isalpha(*s) && *s != '_')
-        return 0;
-    for (const char *p = s; *p; p++)
-    {
-        if (!isalnum(*p) && *p != '_')
-            return 0;
-    }
-    return 1;
-}
-
 void validateFile(const char *filename)
 {
     // validate assembly file before processing
@@ -1399,7 +1387,7 @@ void validateFile(const char *filename)
 
 // main function
 
-int main(int argc, char *argv[])
+int testmain(int argc, char *argv[])
 {
     if (argc != 4)
     {
@@ -1426,4 +1414,8 @@ int main(int argc, char *argv[])
     writeBinary(argv[3]);
 
     return 0;
+}
+
+int main(int argc, char *argv[]){
+    return testmain(argc, argv);
 }
