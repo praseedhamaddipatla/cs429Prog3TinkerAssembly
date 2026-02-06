@@ -940,9 +940,10 @@ void validateFile(const char *filename)
         // handle labels
         if (line[0] == ':')
         {
+
             char *label = line + 1;
 
-            // no empty labels
+            // label must not be empty
             if (*label == '\0')
             {
                 fprintf(stderr, "error line %d: empty label\n", lineNum);
@@ -951,16 +952,19 @@ void validateFile(const char *filename)
                 return;
             }
 
-            // no extra colons
-            if (strchr(label, ':'))
+            // label may not contain spaces or tabs
+            for (char *p = label; *p; p++)
             {
-                fprintf(stderr, "error line %d: multiple labels on one line\n", lineNum);
-                hasError = 1;
-                fclose(f);
-                return;
+                if (*p == ' ' || *p == '\t')
+                {
+                    fprintf(stderr, "error line %d: invalid whitespace in label\n", lineNum);
+                    hasError = 1;
+                    fclose(f);
+                    return;
+                }
             }
 
-            // must be valid identifier
+            // label must be valid identifier
             if (!isValidLabelName(label))
             {
                 fprintf(stderr, "error line %d: invalid label name '%s'\n", lineNum, label);
@@ -1005,6 +1009,14 @@ void validateFile(const char *filename)
                 while ((token = strtok(NULL, delim)) != NULL && numTokens < 10)
                 {
                     strcpy(tokens[numTokens++], token);
+                }
+
+                if (token != NULL)
+                {
+                    fprintf(stderr, "error line %d: too many tokens\n", lineNum);
+                    hasError = 1;
+                    fclose(f);
+                    return;
                 }
 
                 char *opcode = tokens[0];
@@ -1261,6 +1273,9 @@ void validateFile(const char *filename)
                 unsigned long long val = strtoull(content, &end, 0);
 
                 // invalid characters
+                while (*end == ' ' || *end == '\t')
+                    end++;
+
                 if (*end != '\0')
                 {
                     fprintf(stderr, "error line %d: invalid data value '%s'\n", lineNum, content);
