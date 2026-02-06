@@ -216,7 +216,7 @@ uint64_t convertToNumber(const char *lit)
     }
 
     char *endptr = NULL;
-    uint64_t result = strtoull(parse_ptr, &endptr, 0);
+    uint64_t result = strtoull(parse_ptr, &endptr, 10);
 
     if (endptr == parse_ptr || *endptr != '\0')
     {
@@ -405,15 +405,15 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
             else
             {
                 // mov rd, (rs)(imm) pattern split into: mov, rd, rs, imm
-                uint64_t val = (toks[3][0] == ':') ? findLabelAddress(&toks[3][1]) : strtoull(toks[3], NULL, 0);
+                uint64_t val = (toks[3][0] == ':') ? findLabelAddress(&toks[3][1]) : strtoull(toks[3], NULL, 10);
                 fprintf(out, "%s, (%s)(%lld)\n", toks[1], toks[2], (long long)(int64_t)val);
             }
         }
         else if (n == 5)
         {
             // mov (rd)(imm1), (rs)(imm2) pattern split into: mov, rd, imm1, rs, imm2
-            uint64_t val1 = (toks[2][0] == ':') ? findLabelAddress(&toks[2][1]) : strtoull(toks[2], NULL, 0);
-            uint64_t val2 = (toks[4][0] == ':') ? findLabelAddress(&toks[4][1]) : strtoull(toks[4], NULL, 0);
+            uint64_t val1 = (toks[2][0] == ':') ? findLabelAddress(&toks[2][1]) : strtoull(toks[2], NULL, 10);
+            uint64_t val2 = (toks[4][0] == ':') ? findLabelAddress(&toks[4][1]) : strtoull(toks[4], NULL, 10);
             fprintf(out, "(%s)(%lld), (%s)(%lld)\n", toks[1], (long long)(int64_t)val1, toks[3], (long long)(int64_t)val2);
         }
         else
@@ -436,7 +436,32 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
             }
             else
             {
-                fprintf(out, "%s%s", (i == 1 ? " " : ", "), toks[i]);
+                // Check if this is a numeric literal
+                int is_negative = (toks[i][0] == '-');
+                const char *num_start = is_negative ? &toks[i][1] : &toks[i][0];
+                int is_number = isdigit(num_start[0]);
+                
+                if (is_number)
+                {
+                    // Parse and reprint to remove leading zeros
+                    if (is_negative)
+                    {
+                        // Handle negative numbers
+                        long long sval = strtoll(toks[i], NULL, 0);
+                        fprintf(out, "%s%lld", (i == 1 ? " " : ", "), sval);
+                    }
+                    else
+                    {
+                        // Handle positive numbers
+                        unsigned long long val = strtoull(toks[i], NULL, 10);
+                        fprintf(out, "%s%llu", (i == 1 ? " " : ", "), val);
+                    }
+                }
+                else
+                {
+                    // Register or other token - print as-is
+                    fprintf(out, "%s%s", (i == 1 ? " " : ", "), toks[i]);
+                }
             }
         }
         fprintf(out, "\n");
@@ -784,7 +809,7 @@ void validateAllInstructions(FILE *in)
                     {
                         errno = 0;
                         char *endptr = NULL;
-                        unsigned long long val = strtoull(toks[2], &endptr, 0);
+                        unsigned long long val = strtoull(toks[2], &endptr, 10);
 
                         if (errno == ERANGE)
                         {
@@ -1165,7 +1190,7 @@ void validateAllInstructions(FILE *in)
                 // Check for overflow before parsing
                 errno = 0;
                 char *endptr;
-                unsigned long long val = strtoull(buf, &endptr, 0);
+                unsigned long long val = strtoull(buf, &endptr, 10);
 
                 if (errno == ERANGE)
                 {
