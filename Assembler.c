@@ -15,13 +15,7 @@ int inFirst = 0;
 
 typedef enum InstrType
 {
-    R,     // rd, rs, rt
-    I,     // rd, imm
-    BR,    // br types
-    MOV,   // special handling for mov
-    PRIV,  // rd, rs, rt, imm
-    NO_OP, // return, etc
-    OTHER  // rd, rs
+    R, I, BR, MOV, PRIV, NO_OP, OTHER
 } InstrType;
 
 typedef struct InstrInfo
@@ -32,18 +26,21 @@ typedef struct InstrInfo
     int numOps;
 } InstrInfo;
 
-// instruction table to search for match
 InstrInfo instrTable[] = {
-    {"and", 0x00, R, 3}, {"or", 0x01, R, 3}, {"xor", 0x02, R, 3}, {"not", 0x03, OTHER, 2}, {"shftr", 0x04, R, 3}, {"shftri", 0x05, I, 2}, {"shftl", 0x06, R, 3}, {"shftli", 0x07, I, 2}, {"br", 0x08, BR, 1}, {"brr", 0x09, BR, 1}, {"brnz", 0x0b, OTHER, 2}, {"call", 0x0c, BR, 1}, {"return", 0x0d, NO_OP, 0}, {"brgt", 0x0e, R, 3}, {"priv", 0x0f, PRIV, 4}, {"mov", 0x10, MOV, 2}, {"addf", 0x14, R, 3}, {"subf", 0x15, R, 3}, {"mulf", 0x16, R, 3}, {"divf", 0x17, R, 3}, {"add", 0x18, R, 3}, {"addi", 0x19, I, 2}, {"sub", 0x1a, R, 3}, {"subi", 0x1b, I, 2}, {"mul", 0x1c, R, 3}, {"div", 0x1d, R, 3}};
+    {"and", 0x00, R, 3}, {"or", 0x01, R, 3}, {"xor", 0x02, R, 3}, 
+    {"not", 0x03, OTHER, 2}, {"shftr", 0x04, R, 3}, {"shftri", 0x05, I, 2}, 
+    {"shftl", 0x06, R, 3}, {"shftli", 0x07, I, 2}, {"br", 0x08, BR, 1}, 
+    {"brr", 0x09, BR, 1}, {"brnz", 0x0b, OTHER, 2}, {"call", 0x0c, BR, 1}, 
+    {"return", 0x0d, NO_OP, 0}, {"brgt", 0x0e, R, 3}, {"priv", 0x0f, PRIV, 4}, 
+    {"mov", 0x10, MOV, 2}, {"addf", 0x14, R, 3}, {"subf", 0x15, R, 3}, 
+    {"mulf", 0x16, R, 3}, {"divf", 0x17, R, 3}, {"add", 0x18, R, 3}, 
+    {"addi", 0x19, I, 2}, {"sub", 0x1a, R, 3}, {"subi", 0x1b, I, 2}, 
+    {"mul", 0x1c, R, 3}, {"div", 0x1d, R, 3}
+};
 
 int tableSize = sizeof(instrTable) / sizeof(InstrInfo);
 
-typedef enum Section
-{
-    NONE,
-    CODE,
-    DATA
-} Section;
+typedef enum Section { NONE, CODE, DATA } Section;
 
 typedef struct Label
 {
@@ -54,11 +51,9 @@ typedef struct Label
 Label lbls[MAX_LABELS];
 int numLbls = 0;
 
-// add labels, check for duplicates
 void addLabelToArray(const char *lbl, uint64_t addr)
 {
-    int i;
-    for (i = 0; i < numLbls; i++)
+    for (int i = 0; i < numLbls; i++)
     {
         if (strcmp(lbls[i].name, lbl) == 0)
         {
@@ -89,13 +84,10 @@ void addLabelToArray(const char *lbl, uint64_t addr)
 
 uint64_t findLabelAddress(const char *lbl)
 {
-    int i;
-    for (i = 0; i < numLbls; i++)
+    for (int i = 0; i < numLbls; i++)
     {
         if (strcmp(lbls[i].name, lbl) == 0)
-        {
             return lbls[i].addr;
-        }
     }
 
     fprintf(stderr, "Error: undefined label '%s'\n", lbl);
@@ -103,7 +95,6 @@ uint64_t findLabelAddress(const char *lbl)
     return 0;
 }
 
-// remove comments and trailing whitespace
 void cleanLine(char *line)
 {
     int pos = 0;
@@ -119,24 +110,19 @@ void cleanLine(char *line)
 
     int len = strlen(line);
     if (len > 0 && line[len - 1] == '\n')
-    {
         line[len - 1] = '\0';
-    }
 }
 
 int splitIntoTokens(char *line, char toks[MAX_TOK][MAX_TOK_LEN])
 {
     int cnt = 0;
-
-    // replace punctuation with spaces
     int i = 0;
+    
     while (line[i] != '\0')
     {
         char ch = line[i];
         if (ch == ',' || ch == '(' || ch == ')')
-        {
             line[i] = ' ';
-        }
         i++;
     }
 
@@ -163,7 +149,6 @@ int getRegisterNumber(const char *tok)
     char *end;
     long reg = strtol(tok + 1, &end, 10);
 
-    // Must consume the entire string and be in range
     if (*end != '\0' || reg < 0 || reg > 31)
     {
         fprintf(stderr, "Error: invalid register '%s'\n", tok);
@@ -207,32 +192,29 @@ uint64_t convertToNumber(const char *lit)
     return result;
 }
 
-// expand ld macro
 void writeLdMacro(FILE *out, int rd, uint64_t val)
 {
-    // We build the value from MSB to LSB using:
-    // addi + shftli(12), except final shftli(4)
-
-    uint32_t parts[6];
-
-    parts[0] = (val >> 52) & 0xFFF;
-    parts[1] = (val >> 40) & 0xFFF;
-    parts[2] = (val >> 28) & 0xFFF;
-    parts[3] = (val >> 16) & 0xFFF;
-    parts[4] = (val >> 4) & 0xFFF;
-    parts[5] = val & 0xF;
+    uint32_t chunks[6];
+    
+    chunks[0] = (val >> 52) & 0xFFF;
+    chunks[1] = (val >> 40) & 0xFFF;
+    chunks[2] = (val >> 28) & 0xFFF;
+    chunks[3] = (val >> 16) & 0xFFF;
+    chunks[4] = (val >> 4) & 0xFFF;
+    chunks[5] = val & 0xF;
 
     fprintf(out, "\txor r%d, r%d, r%d\n", rd, rd, rd);
-
-    // First 5 chunks
-    for (int i = 0; i < 5; i++)
+    
+    fprintf(out, "\taddi r%d, %u\n", rd, chunks[0]);
+    
+    for (int i = 1; i < 5; i++)
     {
-        fprintf(out, "\taddi r%d, %u\n", rd, parts[i]);
-        fprintf(out, "\tshftli r%d, %d\n", rd, (i == 4 ? 4 : 12));
+        fprintf(out, "\tshftli r%d, 12\n", rd);
+        fprintf(out, "\taddi r%d, %u\n", rd, chunks[i]);
     }
-
-    // Final low nibble
-    fprintf(out, "\taddi r%d, %u\n", rd, parts[5]);
+    
+    fprintf(out, "\tshftli r%d, 4\n", rd);
+    fprintf(out, "\taddi r%d, %u\n", rd, chunks[5]);
 }
 
 void checkMacroArgumentCount(const char *name, int exp, int act)
@@ -315,7 +297,6 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         checkMacroArgumentCount("ld", 2, n);
         if (hadError) return 1;
 
-        // Validate register BEFORE checking literal
         int reg = getRegisterNumber(toks[1]);
         if (hadError) return 1;
 
@@ -337,7 +318,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         }
 
         writeLdMacro(out, reg, val);
-        *addr += 52; // 13 instructions * 4 bytes
+        *addr += 52;
         return 1;
     }
 
@@ -346,40 +327,31 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
 
 void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
 {
-    // Special handling for mov instruction which needs parentheses reconstructed
     if (strcmp(toks[0], "mov") == 0)
     {
         fprintf(out, "\t%s ", toks[0]);
 
-        // Pattern detection based on number of tokens
         if (n == 3)
         {
-            // mov rd, rs (2 operands after splitting)
             fprintf(out, "%s, %s\n", toks[1], toks[2]);
         }
         else if (n == 4)
         {
-            // Either: mov (rd)(imm), rs OR mov rd, (rs)(imm) OR mov rd, imm
-            // Check if token 1 is a register and token 2 is a number (could be negative)
             int tok1_is_reg = (toks[1][0] == 'r');
             int tok2_is_num = (toks[2][0] == '-' || isdigit(toks[2][0]) || toks[2][0] == ':');
 
             if (tok1_is_reg && tok2_is_num)
             {
-                // mov rd, imm (but shouldn't be 4 tokens... this is mov rd, rs, imm which is invalid for output)
-                // Actually this is: mov (rd)(imm), rs pattern split into: mov, rd, imm, rs
                 fprintf(out, "(%s)(%s), %s\n", toks[1], toks[2], toks[3]);
             }
             else
             {
-                // mov rd, (rs)(imm) pattern split into: mov, rd, rs, imm
                 uint64_t val = (toks[3][0] == ':') ? findLabelAddress(&toks[3][1]) : strtoull(toks[3], NULL, 0);
                 fprintf(out, "%s, (%s)(%lld)\n", toks[1], toks[2], (long long)(int64_t)val);
             }
         }
         else if (n == 5)
         {
-            // mov (rd)(imm1), (rs)(imm2) pattern split into: mov, rd, imm1, rs, imm2
             uint64_t val1 = (toks[2][0] == ':') ? findLabelAddress(&toks[2][1]) : strtoull(toks[2], NULL, 0);
             uint64_t val2 = (toks[4][0] == ':') ? findLabelAddress(&toks[4][1]) : strtoull(toks[4], NULL, 0);
             fprintf(out, "(%s)(%lld), (%s)(%lld)\n", toks[1], (long long)(int64_t)val1, toks[3], (long long)(int64_t)val2);
@@ -392,7 +364,6 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
     }
     else
     {
-        // Non-mov instructions - handle normally
         fprintf(out, "\t%s", toks[0]);
         for (int i = 1; i < n; i++)
         {
@@ -416,11 +387,8 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     char buf[MAX_LINE];
     strcpy(buf, &line[1]);
 
-    // labels don't go to intermediate
     if (buf[0] == ':')
-    {
         return;
-    }
 
     char orig[MAX_LINE];
     strcpy(orig, buf);
@@ -429,9 +397,7 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     int n = splitIntoTokens(buf, toks);
 
     if (n == 0)
-    {
         return;
-    }
 
     if (sec == CODE)
     {
@@ -460,19 +426,14 @@ void collectLabels(FILE *in)
         cleanLine(line);
 
         if (line[0] == '\0')
-        {
             continue;
-        }
 
-        // Handle directives
         if (line[0] == '.')
         {
             if (strcmp(line, ".code") == 0)
             {
                 if (sec == NONE)
-                {
                     addr = CODE_START;
-                }
                 sec = CODE;
                 continue;
             }
@@ -489,7 +450,6 @@ void collectLabels(FILE *in)
             }
         }
 
-        // Handle labels
         if (line[0] == ':')
         {
             if (strchr(line, '\t'))
@@ -499,9 +459,8 @@ void collectLabels(FILE *in)
                 return;
             }
 
-            // Validate label name - should be alphanumeric or underscore
             const char *lbl_name = &line[1];
-            if (*lbl_name == '\0') // Empty label name
+            if (*lbl_name == '\0')
             {
                 fprintf(stderr, "Error: empty label name\n");
                 hadError = 1;
@@ -523,24 +482,18 @@ void collectLabels(FILE *in)
             continue;
         }
 
-        // Handle instructions/data
         if (line[0] == '\t')
         {
             if (line[1] == ':')
-            {
                 continue;
-            }
 
-            // Estimate address increment
             char buf[MAX_LINE];
             strcpy(buf, &line[1]);
             char toks[MAX_TOK][MAX_TOK_LEN];
             int n = splitIntoTokens(buf, toks);
 
             if (n == 0)
-            {
                 continue;
-            }
 
             if (sec == CODE)
             {
@@ -571,7 +524,6 @@ void collectLabels(FILE *in)
             continue;
         }
 
-        // If we get here, line format is invalid
         if (line[0] == ' ')
         {
             fprintf(stderr, "Error: instruction must begin with a tab\n");
@@ -585,7 +537,6 @@ void collectLabels(FILE *in)
     }
 }
 
-// NEW FUNCTION: Validate all instructions without writing output
 void validateAllInstructions(FILE *in)
 {
     char line[MAX_LINE];
@@ -644,7 +595,6 @@ void validateAllInstructions(FILE *in)
 
             if (sec == CODE)
             {
-                // Validate macros
                 if (strcmp(toks[0], "halt") == 0)
                 {
                     checkMacroArgumentCount("halt", 0, n);
@@ -708,7 +658,6 @@ void validateAllInstructions(FILE *in)
                 }
                 else
                 {
-                    // Validate regular instructions - find instruction type
                     int found = 0;
                     InstrType type = R;
                     int exp = 0;
@@ -731,7 +680,6 @@ void validateAllInstructions(FILE *in)
                         return;
                     }
 
-                    // Check operand count
                     int ops = n - 1;
                     if (type == MOV)
                     {
@@ -750,7 +698,6 @@ void validateAllInstructions(FILE *in)
                         return;
                     }
 
-                    // Validate operands based on type
                     if (type == R)
                     {
                         getRegisterNumber(toks[1]);
@@ -971,19 +918,14 @@ void firstPass(FILE *in, FILE *mid)
     Section sec = NONE;
     Section lastWritten = NONE;
     uint64_t addr = CODE_START;
-    int lineNum = 0;
 
     while (fgets(line, sizeof(line), in))
     {
-        lineNum++;
         cleanLine(line);
 
         if (line[0] == '\0')
-        {
             continue;
-        }
 
-        // Check for invalid leading spaces (not tabs)
         if (line[0] == ' ')
         {
             fprintf(stderr, "Error: instruction must begin with a tab\n");
@@ -991,7 +933,6 @@ void firstPass(FILE *in, FILE *mid)
             return;
         }
 
-        // Handle directives
         if (line[0] == '.')
         {
             if (strcmp(line, ".code") == 0)
@@ -1022,21 +963,17 @@ void firstPass(FILE *in, FILE *mid)
             }
         }
 
-        // Handle labels
         if (line[0] == ':')
         {
-            // Check if there's a tab after the label (label not alone on line)
             if (strchr(line, '\t'))
             {
                 fprintf(stderr, "Error: label must be alone on its line\n");
                 hadError = 1;
                 return;
             }
-            // Labels already collected, skip
             continue;
         }
 
-        // Handle instructions/data
         if (line[0] == '\t')
         {
             handleTabLine(mid, line, sec, &addr);
@@ -1044,8 +981,6 @@ void firstPass(FILE *in, FILE *mid)
         }
         else
         {
-            // Line doesn't start with '.', ':', '\t', or ' ' (space already handled)
-            // This is an error - likely a malformed label or instruction
             fprintf(stderr, "Error: invalid line format\n");
             hadError = 1;
             return;
@@ -1305,8 +1240,7 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
 
 InstrType findInstructionInfo(char *name, uint32_t *op, int *exp)
 {
-    int i;
-    for (i = 0; i < tableSize; i++)
+    for (int i = 0; i < tableSize; i++)
     {
         if (strcmp(instrTable[i].name, name) == 0)
         {
@@ -1318,17 +1252,17 @@ InstrType findInstructionInfo(char *name, uint32_t *op, int *exp)
 
     fprintf(stderr, "Error: invalid instruction '%s'\n", name);
     hadError = 1;
-    return R; // Return dummy value
+    return R;
 }
 
 uint32_t assembleInstruction(uint32_t op, uint32_t rd, uint32_t rs, uint32_t rt, uint32_t imm)
 {
     uint32_t res = 0;
-    res |= (imm & 0xFFF);     // bits 0-11
-    res |= (rt & 0x1F) << 12; // bits 12-16 (5 bits)
-    res |= (rs & 0x1F) << 17; // bits 17-21 (5 bits)
-    res |= (rd & 0x1F) << 22; // bits 22-26 (5 bits)
-    res |= (op & 0x3F) << 27; // bits 27-32 (6 bits)
+    res |= (imm & 0xFFF);
+    res |= (rt & 0x1F) << 12;
+    res |= (rs & 0x1F) << 17;
+    res |= (rd & 0x1F) << 22;
+    res |= (op & 0x3F) << 27;
     return res;
 }
 
@@ -1411,7 +1345,6 @@ void writeCodeInstr(FILE *out, char *line)
     uint32_t mc = convertToMachineCode(toks, n);
     if (hadError) return;
 
-    // Write in little-endian byte order (LSB first)
     unsigned char bytes[4];
     bytes[0] = mc & 0xFF;
     bytes[1] = (mc >> 8) & 0xFF;
@@ -1438,7 +1371,6 @@ void writeDataValue(FILE *out, char *line)
     
     uint32_t v = (uint32_t)val;
 
-    // Write in little-endian byte order (LSB first)
     unsigned char bytes[4];
     bytes[0] = v & 0xFF;
     bytes[1] = (v >> 8) & 0xFF;
@@ -1461,7 +1393,6 @@ void secondPass(FILE *mid, FILE *out)
         if (line[0] == '\0')
             continue;
 
-        // Check for invalid leading spaces (not tabs)
         if (line[0] == ' ')
         {
             fprintf(stderr, "Error: instruction must begin with a tab\n");
@@ -1469,7 +1400,6 @@ void secondPass(FILE *mid, FILE *out)
             return;
         }
 
-        // Handle directives
         if (line[0] == '.')
         {
             if (strcmp(line, ".code") == 0)
@@ -1490,13 +1420,9 @@ void secondPass(FILE *mid, FILE *out)
             }
         }
 
-        // Handle labels (skip them - they were already processed)
         if (line[0] == ':')
-        {
             continue;
-        }
 
-        // Handle instructions/data
         if (line[0] == '\t')
         {
             if (line[1] == ':')
@@ -1523,7 +1449,6 @@ void secondPass(FILE *mid, FILE *out)
             continue;
         }
 
-        // If we get here, line format is invalid
         fprintf(stderr, "Error: invalid line format\n");
         hadError = 1;
         return;
@@ -1545,7 +1470,6 @@ int testmain(int argc, char **argv)
         return 1;
     }
 
-    // STEP 1: Collect all labels
     collectLabels(fIn);
     if (hadError)
     {
@@ -1554,7 +1478,6 @@ int testmain(int argc, char **argv)
     }
     fseek(fIn, 0, SEEK_SET);
 
-    // STEP 2: Validate all instructions (WITHOUT writing output)
     validateAllInstructions(fIn);
     if (hadError)
     {
@@ -1563,7 +1486,6 @@ int testmain(int argc, char **argv)
     }
     fseek(fIn, 0, SEEK_SET);
 
-    // STEP 3: NOW create intermediate file and write to it
     FILE *fMid = fopen(argv[2], "w+");
     if (!fMid)
     {
@@ -1583,7 +1505,6 @@ int testmain(int argc, char **argv)
     fclose(fIn);
     fseek(fMid, 0, SEEK_SET);
 
-    // STEP 4: Create binary output
     FILE *fOut = fopen(argv[3], "wb");
     if (!fOut)
     {
