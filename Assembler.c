@@ -173,6 +173,27 @@ uint64_t toNum(const char *s) {
     return val;
 }
 
+// write ld macro expansion
+void writeLd(FILE *f, int rd, uint64_t v) {
+    // split into 12-bit chunks
+    uint32_t p[6];
+    p[0] = (v >> 52) & 0xFFF;
+    p[1] = (v >> 40) & 0xFFF;
+    p[2] = (v >> 28) & 0xFFF;
+    p[3] = (v >> 16) & 0xFFF;
+    p[4] = (v >> 4) & 0xFFF;
+    p[5] = v & 0xF;
+    
+    fprintf(f, "\txor r%d, r%d, r%d\n", rd, rd, rd);
+    fprintf(f, "\taddi r%d, %u\n", rd, p[0]);
+    for (int i = 1; i < 5; i++) {
+        fprintf(f, "\tshftli r%d, 12\n", rd);
+        fprintf(f, "\taddi r%d, %u\n", rd, p[i]);
+    }
+    fprintf(f, "\tshftli r%d, 4\n", rd);
+    fprintf(f, "\taddi r%d, %u\n", rd, p[5]);
+}
+
 // check macro arg count
 void chkMacro(const char *n, int exp, int act) {
     if (act - 1 != exp) {
@@ -181,35 +202,10 @@ void chkMacro(const char *n, int exp, int act) {
     }
 }
 
-// write ld macro expansion
-void writeLd(FILE *f, int rd, uint64_t v) {
-    // split into 12-bit chunks (most significant first)
-    uint32_t p[6];
-    p[0] = (v >> 52) & 0xFFF;
-    p[1] = (v >> 40) & 0xFFF;
-    p[2] = (v >> 28) & 0xFFF;
-    p[3] = (v >> 16) & 0xFFF;
-    p[4] = (v >> 4) & 0xFFF;
-    p[5] = v & 0xF;
-
-    // reset register first
-    fprintf(f, "\txor r%d, r%d, r%d\n", rd, rd, rd);
-
-    // add highest 12-bit chunk first
-    fprintf(f, "\taddi r%d, %u\n", rd, p[0]);
-    for (int i = 1; i < 5; i++) {
-        fprintf(f, "\tshftli r%d, 12\n", rd);
-        fprintf(f, "\taddi r%d, %u\n", rd, p[i]);
-    }
-    // add lowest 4 bits
-    fprintf(f, "\tshftli r%d, 4\n", rd);
-    fprintf(f, "\taddi r%d, %u\n", rd, p[5]);
-}
-
 // try expand macro, return 1 if matched
 int tryMacro(FILE *f, char t[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *a) {
     char *nm = t[0];
-
+    
     if (strcmp(nm, "halt") == 0) {
         chkMacro("halt", 0, n);
         if (err) return 1;
@@ -241,21 +237,19 @@ int tryMacro(FILE *f, char t[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *a) {
     if (strcmp(nm, "push") == 0) {
         chkMacro("push", 1, n);
         if (err) return 1;
-        int r = getReg(t[1]);
+        getReg(t[1]);
         if (err) return 1;
-        // Gradescope expects: subtract first, then store
+        fprintf(f, "\tmov (r31)(-8), %s\n", t[1]);
         fprintf(f, "\tsubi r31, 8\n");
-        fprintf(f, "\tmov (r31)(0), r%d\n", r);
         *a += 8;
         return 1;
     }
     if (strcmp(nm, "pop") == 0) {
         chkMacro("pop", 1, n);
         if (err) return 1;
-        int r = getReg(t[1]);
+        getReg(t[1]);
         if (err) return 1;
-        // Gradescope expects: load first, then add
-        fprintf(f, "\tmov r%d, (r31)(0)\n", r);
+        fprintf(f, "\tmov %s, (r31)(0)\n", t[1]);
         fprintf(f, "\taddi r31, 8\n");
         *a += 8;
         return 1;
@@ -265,15 +259,18 @@ int tryMacro(FILE *f, char t[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *a) {
         if (err) return 1;
         int r = getReg(t[1]);
         if (err) return 1;
+        if (t[2][0] != ':' && isNeg(t[2])) {
+            fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
+            err = 1;
+            return 1;
+        }
         uint64_t v = toNum(t[2]);
         if (err) return 1;
-        // call the fixed writeLd
         writeLd(f, r, v);
         *a += 52;
         return 1;
     }
-
-    return 0; // not a macro
+    return 0;
 }
 
 // print instruction to intermediate file
