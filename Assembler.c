@@ -879,6 +879,26 @@ static int isValidLabelName(const char *s)
     return 1;
 }
 
+void trimTrailingWhitespace(char *str) {
+    int index, i;
+
+    // last index of non-whitespace
+    index = -1;
+    for (i = 0; str[i] != '\\0'; i++) {
+        if (!isspace((unsigned char)str[i])) {
+            index = i;
+        }
+    }
+
+    // null terminate end
+    if (index != -1) {
+        str[index + 1] = '\\0';
+    } else {
+        // empty string if all whitespace
+        str[0] = '\\0';
+    }
+}
+
 void validateFile(const char *filename)
 {
     // validate assembly file before processing
@@ -1246,7 +1266,20 @@ void validateFile(const char *filename)
             else if (currentMode == 0)
             {
                 // data section - validate unsigned 64-bit integer
-                // no negative values
+
+                // remove trailing whitespace
+                trimTrailingWhitespace(content);
+
+                // inline labels not allowed
+                if (strchr(content, ':') && content[0] != ':')
+                {
+                    fprintf(stderr, "error line %d: inline labels not allowed\n", lineNum);
+                    hasError = 1;
+                    fclose(f);
+                    return;
+                }
+
+                // negative values
                 if (isNegative(content))
                 {
                     fprintf(stderr, "error line %d: data values must be unsigned\n", lineNum);
@@ -1255,13 +1288,16 @@ void validateFile(const char *filename)
                     return;
                 }
 
-                // strict unsigned 64-bit range check
+                // parse number safely
                 errno = 0;
-                char *end;
-                unsigned long long val = strtoull(content, &end, 0);
+                char *endptr;
+                unsigned long long val = strtoull(content, &endptr, 0);
 
-                // invalid characters
-                if (*end != '\0')
+                // skip trailing whitespace
+                while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n')
+                    endptr++;
+
+                if (*endptr != '\0')
                 {
                     fprintf(stderr, "error line %d: invalid data value '%s'\n", lineNum, content);
                     hasError = 1;
@@ -1269,7 +1305,6 @@ void validateFile(const char *filename)
                     return;
                 }
 
-                // overflow
                 if (errno == ERANGE)
                 {
                     fprintf(stderr, "error line %d: data value out of 64-bit range\n", lineNum);
