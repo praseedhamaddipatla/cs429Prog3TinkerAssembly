@@ -232,27 +232,32 @@ uint64_t convertToNumber(const char *lit)
 void writeLdMacro(FILE *out, int rd, uint64_t val)
 {
     // We build the value from MSB to LSB using:
-    // addi + shftli(12), except final shftli(4)
+    // addi + shftli, processing 12-bit chunks at a time
+    // 64 bits = 5 chunks of 12 bits + 1 chunk of 4 bits
 
     uint32_t parts[6];
 
-    parts[0] = (val >> 52) & 0xFFF;
-    parts[1] = (val >> 40) & 0xFFF;
-    parts[2] = (val >> 28) & 0xFFF;
-    parts[3] = (val >> 16) & 0xFFF;
-    parts[4] = (val >> 4) & 0xFFF;
-    parts[5] = val & 0xF;
+    parts[0] = (val >> 52) & 0xFFF; // bits 52-63 (12 bits)
+    parts[1] = (val >> 40) & 0xFFF; // bits 40-51 (12 bits)
+    parts[2] = (val >> 28) & 0xFFF; // bits 28-39 (12 bits)
+    parts[3] = (val >> 16) & 0xFFF; // bits 16-27 (12 bits)
+    parts[4] = (val >> 4) & 0xFFF;  // bits 4-15 (12 bits)
+    parts[5] = val & 0xF;           // bits 0-3 (4 bits)
 
     fprintf(out, "\txor r%d, r%d, r%d\n", rd, rd, rd);
 
-    // First 5 chunks
-    for (int i = 0; i < 5; i++)
+    // First chunk - just add (no shift before)
+    fprintf(out, "\taddi r%d, %u\n", rd, parts[0]);
+
+    // Chunks 1-4: shift to make room, then add
+    for (int i = 1; i < 5; i++)
     {
+        fprintf(out, "\tshftli r%d, 12\n", rd);
         fprintf(out, "\taddi r%d, %u\n", rd, parts[i]);
-        fprintf(out, "\tshftli r%d, %d\n", rd, (i == 4 ? 4 : 12));
     }
 
-    // Final low nibble
+    // Final chunk: shift by 4, then add
+    fprintf(out, "\tshftli r%d, 4\n", rd);
     fprintf(out, "\taddi r%d, %u\n", rd, parts[5]);
 }
 
@@ -440,7 +445,7 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
                 int is_negative = (toks[i][0] == '-');
                 const char *num_start = is_negative ? &toks[i][1] : &toks[i][0];
                 int is_number = isdigit(num_start[0]);
-                
+
                 if (is_number)
                 {
                     // Parse and reprint to remove leading zeros
@@ -1206,13 +1211,7 @@ void validateAllInstructions(FILE *in)
                     return;
                 }
 
-                if (val > UINT32_MAX)
-                {
-                    fprintf(stderr, "Error: data value %llu exceeds 32-bit limit (max %u)\n",
-                            (unsigned long long)val, UINT32_MAX);
-                    hadError = 1;
-                    return;
-                }
+                (void)val;
             }
         }
         else
@@ -1303,9 +1302,10 @@ void firstPass(FILE *in, FILE *mid)
                 }
                 lastWritten = sec;
             }
-            
+
             handleTabLine(mid, line, sec, &addr);
-            if (hadError) return;
+            if (hadError)
+                return;
         }
         else
         {
