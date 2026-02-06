@@ -788,61 +788,89 @@ void validate(FILE *in) {
     }
 }
 
-// first pass: expand macros, write intermediate
-void pass1(FILE *in, FILE *mid) {
+void pass1(const char *inFile, const char *outFile) {
+    FILE *in = fopen(inFile, "r");
+    if (!in) {
+        fprintf(stderr, "Error: cannot open input file '%s'\n", inFile);
+        err = 1;
+        return;
+    }
+
+    // 1. Collect labels with correct addresses
+    collectLbls(in);
+    if (err) {
+        fclose(in);
+        return;
+    }
+
+    // rewind to write intermediate file
+    rewind(in);
+
+    FILE *out = fopen(outFile, "w");
+    if (!out) {
+        fprintf(stderr, "Error: cannot open output file '%s'\n", outFile);
+        fclose(in);
+        err = 1;
+        return;
+    }
+
     char ln[MAX_LINE];
-    Sec sec = NONE, last = NONE;
+    Sec sec = NONE;
     uint64_t addr = CODE_START;
-    
+
     while (fgets(ln, sizeof(ln), in)) {
         clean(ln);
         if (ln[0] == '\0') continue;
-        if (ln[0] == ' ') {
-            fprintf(stderr, "Error: instruction must begin with a tab\n");
-            err = 1;
-            return;
-        }
-        
-        // directives
+
+        // section directives
         if (ln[0] == '.') {
+            fprintf(out, "%s\n", ln);
             if (strcmp(ln, ".code") == 0) {
                 sec = CODE;
+                addr = CODE_START;
             } else if (strcmp(ln, ".data") == 0) {
                 sec = DATA;
-            } else {
-                fprintf(stderr, "Error: invalid directive '%s'\n", ln);
-                err = 1;
-                return;
             }
             continue;
         }
-        
+
+        // labels
         if (ln[0] == ':') {
-            if (strchr(ln, '\t')) {
-                fprintf(stderr, "Error: label must be alone on its line\n");
-                err = 1;
-                return;
+            fprintf(out, "%s\n", ln);  // write labels as-is
+            continue;
+        }
+
+        // tab-indented lines (instructions or data)
+        if (ln[0] == '\t') {
+            char buf[MAX_LINE];
+            strcpy(buf, &ln[1]);
+
+            char t[MAX_TOK][MAX_TOK_LEN];
+            int n = tokenize(buf, t);
+            if (n == 0) continue;
+
+            // write line to intermediate file
+            fprintf(out, "\t%s\n", buf);
+
+            // increment address
+            if (sec == CODE) {
+                if (strcmp(t[0], "push") == 0 || strcmp(t[0], "pop") == 0) addr += 8;
+                else if (strcmp(t[0], "ld") == 0) addr += 52;
+                else addr += 4;
+            } else if (sec == DATA) {
+                addr += 4;
             }
             continue;
         }
-        
-        // instructions/data
-        if (ln[0] == '\t') {
-            // write section directive only when needed
-            if (sec != last) {
-                if (sec == CODE) fprintf(mid, ".code\n");
-                else if (sec == DATA) fprintf(mid, ".data\n");
-                last = sec;
-            }
-            handleLine(mid, ln, sec, &addr);
-            if (err) return;
-        } else {
-            fprintf(stderr, "Error: invalid line format\n");
-            err = 1;
-            return;
-        }
+
+        // anything else
+        fprintf(out, "%s\n", ln);
     }
+
+    fclose(in);
+    fclose(out);
 }
+
 
 // check operand count
 void chkOps(const char *nm, int exp, int act, InstrType ty) {
@@ -1240,7 +1268,7 @@ int testmain(int argc, char **argv) {
         return 1;
     }
     
-    pass1(in, mid);
+    pass1(argv[1], argv[2]);
     if (err) {
         fclose(in);
         fclose(mid);
