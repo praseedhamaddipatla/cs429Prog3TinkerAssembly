@@ -41,16 +41,15 @@ char *binaryFile;
 
 void cleanupAndExit()
 {
-    FILE *f1 = fopen(intermediateFile, "w");
-    if (f1)
-        fclose(f1);
+    if (intermediateFile)
+        remove(intermediateFile);
 
-    FILE *f2 = fopen(binaryFile, "w");
-    if (f2)
-        fclose(f2);
+    if (binaryFile)
+        remove(binaryFile);
 
     exit(1);
 }
+
 
 void cleanLine(char *s)
 {
