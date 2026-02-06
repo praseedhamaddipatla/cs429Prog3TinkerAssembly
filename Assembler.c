@@ -152,26 +152,33 @@ uint64_t toNum(const char *s) {
         err = 1;
         return 0;
     }
+
     // label reference
-    if (s[0] == ':')
-        return findLbl(&s[1]);
-    
-    // strip leading zeros for decimal
+    if (s[0] == ':') {
+        uint64_t addr = findLbl(&s[1]);
+        if (err) return 0;
+        return addr;
+    }
+
+    // strip leading zeros for decimal numbers
     const char *p = s;
     if (s[0] == '0' && s[1] != 'x' && s[1] != 'X' && s[1] != '\0') {
         while (*p == '0' && *(p + 1) != '\0')
             p++;
     }
-    
+
     char *end = NULL;
+    errno = 0;
     uint64_t val = strtoull(p, &end, 10);
-    if (end == p || *end != '\0') {
+    if (errno != 0 || end == p || *end != '\0') {
         fprintf(stderr, "Error: invalid numeric literal '%s'\n", s);
         err = 1;
         return 0;
     }
+
     return val;
 }
+
 
 // write ld macro expansion
 void writeLd(FILE *f, int rd, uint64_t v) {
@@ -327,49 +334,47 @@ void printInstr(FILE *f, char t[MAX_TOK][MAX_TOK_LEN], int n) {
 }
 
 // handle tab-indented line
+// handle tab-indented line
 void handleLine(FILE *f, char *ln, Sec sec, uint64_t *a) {
     char buf[MAX_LINE];
     strcpy(buf, &ln[1]);
-    
-    // skip inline labels
-    if (buf[0] == ':')
-        return;
-    
-    char orig[MAX_LINE];
-    strcpy(orig, buf);
-    
+
     char t[MAX_TOK][MAX_TOK_LEN];
     int n = tokenize(buf, t);
-    if (n == 0)
-        return;
-    
+    if (n == 0) return;
+
+    // if line starts with a label, just ignore for intermediate
+    if (t[0][0] == ':') return;
+
     if (sec == CODE) {
         if (!tryMacro(f, t, n, a)) {
             printInstr(f, t, n);
             *a += 4;
         }
     } else if (sec == DATA) {
-        uint64_t v = toNum(orig);
+        uint64_t v = toNum(t[0]);
+        if (err) return;
         fprintf(f, "\t%llu\n", (unsigned long long)v);
         *a += 4;
     }
 }
 
-// collect all labels
+
+// collect all labels and assign correct addresses
 void collectLbls(FILE *in) {
     char ln[MAX_LINE];
     Sec sec = NONE;
     uint64_t addr = CODE_START;
-    
+
     while (fgets(ln, sizeof(ln), in)) {
         clean(ln);
         if (ln[0] == '\0') continue;
-        
+
         // directives
         if (ln[0] == '.') {
             if (strcmp(ln, ".code") == 0) {
-                if (sec == NONE) addr = CODE_START;
                 sec = CODE;
+                addr = CODE_START;
             } else if (strcmp(ln, ".data") == 0) {
                 sec = DATA;
             } else {
@@ -379,14 +384,9 @@ void collectLbls(FILE *in) {
             }
             continue;
         }
-        
+
         // labels
         if (ln[0] == ':') {
-            if (strchr(ln, '\t')) {
-                fprintf(stderr, "Error: label must be alone on its line\n");
-                err = 1;
-                return;
-            }
             const char *nm = &ln[1];
             if (*nm == '\0') {
                 fprintf(stderr, "Error: empty label name\n");
@@ -404,42 +404,25 @@ void collectLbls(FILE *in) {
             if (err) return;
             continue;
         }
-        
+
         // instructions/data
         if (ln[0] == '\t') {
-            if (ln[1] == ':') continue;
-            
             char buf[MAX_LINE];
             strcpy(buf, &ln[1]);
             char t[MAX_TOK][MAX_TOK_LEN];
             int n = tokenize(buf, t);
             if (n == 0) continue;
-            
+
             if (sec == CODE) {
-                char *nm = t[0];
-                if (strcmp(nm, "halt") == 0 || strcmp(nm, "in") == 0 ||
-                    strcmp(nm, "out") == 0 || strcmp(nm, "clr") == 0) {
-                    addr += 4;
-                } else if (strcmp(nm, "push") == 0 || strcmp(nm, "pop") == 0) {
-                    addr += 8;
-                } else if (strcmp(nm, "ld") == 0) {
-                    addr += 52;
-                } else {
-                    addr += 4;
-                }
+                // macros with variable size
+                if (strcmp(t[0], "push") == 0 || strcmp(t[0], "pop") == 0) addr += 8;
+                else if (strcmp(t[0], "ld") == 0) addr += 52;
+                else addr += 4;
             } else if (sec == DATA) {
                 addr += 4;
             }
             continue;
         }
-        
-        if (ln[0] == ' ') {
-            fprintf(stderr, "Error: instruction must begin with a tab\n");
-        } else {
-            fprintf(stderr, "Error: invalid line format\n");
-        }
-        err = 1;
-        return;
     }
 }
 
