@@ -892,6 +892,8 @@ void validateFile(const char *filename)
     char line[MAX_LINE];
     int currentMode = -1; // -1 = unknown, 0 = data, 1 = code
     int lineNum = 0;
+    int hasCode = 0;
+
 
     while (fgets(line, sizeof(line), f))
     {
@@ -919,6 +921,7 @@ void validateFile(const char *filename)
             if (strcmp(line, ".code") == 0)
             {
                 currentMode = 1;
+                hasCode=1;
             }
             else if (strcmp(line, ".data") == 0)
             {
@@ -1274,7 +1277,9 @@ void validateFile(const char *filename)
             return;
         }
     }
-
+    if(!hasCode){
+        fprintf(stderr, "error: no .code in file");
+    }
     fclose(f);
 }
 
