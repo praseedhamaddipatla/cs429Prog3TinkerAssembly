@@ -41,11 +41,13 @@ char *binaryFile;
 
 void cleanupAndExit()
 {
-    if (intermediateFile)
-        remove(intermediateFile);
+    FILE *f1 = fopen(intermediateFile, "w");
+    if (f1)
+        fclose(f1);
 
-    if (binaryFile)
-        remove(binaryFile);
+    FILE *f2 = fopen(binaryFile, "w");
+    if (f2)
+        fclose(f2);
 
     exit(1);
 }
@@ -145,14 +147,14 @@ void firstPass(const char *filename)
                 cleanupAndExit();
             }
 
-            // first character
+            // first character must be letter or underscore
             if (!isalpha((unsigned char)*name) && *name != '_')
             {
                 fprintf(stderr, "error: invalid label\n");
                 cleanupAndExit();
             }
 
-            // validate entire label
+            // remaining characters must be alnum or underscore ONLY
             for (const char *p = name; *p; p++)
             {
                 if (!isalnum((unsigned char)*p) && *p != '_')
@@ -162,7 +164,8 @@ void firstPass(const char *filename)
                 }
             }
 
-            addLabel(name, address);
+            // store label WITH colon (critical!)
+            addLabel(buffer, address);
             continue;
         }
 
