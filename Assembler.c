@@ -3,7 +3,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
-#include <errno.h>
 
 #define MAX_LINE 512
 #define MAX_TOK 8
@@ -65,7 +64,7 @@ void addLabelToArray(const char *lbl, uint64_t addr)
         {
             fprintf(stderr, "Error: duplicate label '%s'\n", lbl);
             hadError = 1;
-            return;
+            exit(1);
         }
     }
 
@@ -73,14 +72,14 @@ void addLabelToArray(const char *lbl, uint64_t addr)
     {
         fprintf(stderr, "Error: too many labels\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
     if (strlen(lbl) > 255)
     {
         fprintf(stderr, "Error: label name too long (max 256 chars)\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
     strcpy(lbls[numLbls].name, lbl);
@@ -90,18 +89,20 @@ void addLabelToArray(const char *lbl, uint64_t addr)
 
 uint64_t findLabelAddress(const char *lbl)
 {
+
     int i;
     for (i = 0; i < numLbls; i++)
     {
         if (strcmp(lbls[i].name, lbl) == 0)
         {
+
             return lbls[i].addr;
         }
     }
 
     fprintf(stderr, "Error: undefined label '%s'\n", lbl);
     hadError = 1;
-    return 0;
+    exit(1);
 }
 
 // remove comments and trailing whitespace
@@ -158,7 +159,7 @@ int getRegisterNumber(const char *tok)
     {
         fprintf(stderr, "Error: invalid register '%s'\n", tok);
         hadError = 1;
-        return -1;
+        exit(1);
     }
 
     char *end;
@@ -169,7 +170,7 @@ int getRegisterNumber(const char *tok)
     {
         fprintf(stderr, "Error: invalid register '%s'\n", tok);
         hadError = 1;
-        return -1;
+        exit(1);
     }
 
     return (int)reg;
@@ -186,7 +187,7 @@ uint64_t convertToNumber(const char *lit)
     {
         fprintf(stderr, "Error: NULL literal\n");
         hadError = 1;
-        return 0;
+        exit(1);
     }
 
     if (lit[0] == ':')
@@ -202,7 +203,7 @@ uint64_t convertToNumber(const char *lit)
     {
         fprintf(stderr, "Error: invalid numeric literal '%s'\n", lit);
         hadError = 1;
-        return 0;
+        exit(1);
     }
 
     return result;
@@ -244,6 +245,7 @@ void checkMacroArgumentCount(const char *name, int exp, int act)
         fprintf(stderr, "Error: macro '%s' expects %d argument(s), got %d\n",
                 name, exp, args);
         hadError = 1;
+        exit(1);
     }
 }
 
@@ -254,8 +256,6 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "halt") == 0)
     {
         checkMacroArgumentCount("halt", 0, n);
-        if (hadError)
-            return 1;
         fprintf(out, "\tpriv r0, r0, r0, 0\n");
         *addr += 4;
         return 1;
@@ -264,8 +264,6 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "in") == 0)
     {
         checkMacroArgumentCount("in", 2, n);
-        if (hadError)
-            return 1;
         fprintf(out, "\tpriv %s, %s, r0, 3\n", toks[1], toks[2]);
         *addr += 4;
         return 1;
@@ -274,8 +272,6 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "out") == 0)
     {
         checkMacroArgumentCount("out", 2, n);
-        if (hadError)
-            return 1;
         fprintf(out, "\tpriv %s, %s, r0, 4\n", toks[1], toks[2]);
         *addr += 4;
         return 1;
@@ -284,8 +280,6 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "clr") == 0)
     {
         checkMacroArgumentCount("clr", 1, n);
-        if (hadError)
-            return 1;
         fprintf(out, "\txor %s, %s, %s\n", toks[1], toks[1], toks[1]);
         *addr += 4;
         return 1;
@@ -294,11 +288,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "push") == 0)
     {
         checkMacroArgumentCount("push", 1, n);
-        if (hadError)
-            return 1;
         getRegisterNumber(toks[1]);
-        if (hadError)
-            return 1;
         fprintf(out, "\tmov (r31)(-8), %s\n", toks[1]);
         fprintf(out, "\tsubi r31, 8\n");
         *addr += 8;
@@ -308,11 +298,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "pop") == 0)
     {
         checkMacroArgumentCount("pop", 1, n);
-        if (hadError)
-            return 1;
         getRegisterNumber(toks[1]);
-        if (hadError)
-            return 1;
         fprintf(out, "\tmov %s, (r31)(0)\n", toks[1]);
         fprintf(out, "\taddi r31, 8\n");
         *addr += 8;
@@ -321,31 +307,25 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
 
     if (strcmp(name, "ld") == 0)
     {
+
         checkMacroArgumentCount("ld", 2, n);
-        if (hadError)
-            return 1;
 
         // Validate register BEFORE checking literal
-        int reg = getRegisterNumber(toks[1]);
-        if (hadError)
-            return 1;
+        int reg = getRegisterNumber(toks[1]); // This will error if invalid
 
         if (toks[2][0] != ':' && checkIfNegative(toks[2]))
         {
             fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
             hadError = 1;
-            return 1;
+            exit(1);
         }
 
         uint64_t val = convertToNumber(toks[2]);
-        if (hadError)
-            return 1;
-
         if (toks[2][0] != ':' && val > UINT64_MAX)
         {
             fprintf(stderr, "Error: ld literal overflow\n");
             hadError = 1;
-            return 1;
+            exit(1);
         }
 
         writeLdMacro(out, reg, val);
@@ -400,6 +380,7 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
         {
             fprintf(stderr, "Error: unexpected mov token count %d\n", n);
             hadError = 1;
+            exit(1);
         }
     }
     else
@@ -497,7 +478,7 @@ void collectLabels(FILE *in)
             {
                 fprintf(stderr, "Error: invalid directive '%s'\n", line);
                 hadError = 1;
-                return;
+                exit(1);
             }
         }
 
@@ -508,7 +489,7 @@ void collectLabels(FILE *in)
             {
                 fprintf(stderr, "Error: label must be alone on its line\n");
                 hadError = 1;
-                return;
+                exit(1);
             }
 
             // Validate label name - should be alphanumeric or underscore
@@ -517,28 +498,20 @@ void collectLabels(FILE *in)
             {
                 fprintf(stderr, "Error: empty label name\n");
                 hadError = 1;
-                return;
+                exit(1);
             }
 
             for (const char *p = lbl_name; *p; p++)
             {
-                if (isspace((unsigned char)*p))
-                {
-                    fprintf(stderr, "Error: label cannot contain spaces\n");
-                    hadError = 1;
-                    return;
-                }
                 if (!isalnum((unsigned char)*p) && *p != '_')
                 {
                     fprintf(stderr, "Error: invalid label name '%s'\n", line);
                     hadError = 1;
-                    return;
+                    exit(1);
                 }
             }
 
             addLabelToArray(lbl_name, addr);
-            if (hadError)
-                return;
             continue;
         }
 
@@ -600,604 +573,7 @@ void collectLabels(FILE *in)
             fprintf(stderr, "Error: invalid line format\n");
         }
         hadError = 1;
-        return;
-    }
-}
-
-// NEW FUNCTION: Validate all instructions without writing output
-void validateAllInstructions(FILE *in)
-{
-    char line[MAX_LINE];
-    Section sec = NONE;
-
-    while (fgets(line, sizeof(line), in))
-    {
-        cleanLine(line);
-
-        if (line[0] == '\0')
-            continue;
-
-        if (line[0] == ' ')
-        {
-            fprintf(stderr, "Error: instruction must begin with a tab\n");
-            hadError = 1;
-            return;
-        }
-
-        if (line[0] == '.')
-        {
-            if (strcmp(line, ".code") == 0)
-            {
-                sec = CODE;
-                continue;
-            }
-            else if (strcmp(line, ".data") == 0)
-            {
-                sec = DATA;
-                continue;
-            }
-            else
-            {
-                fprintf(stderr, "Error: invalid directive '%s'\n", line);
-                hadError = 1;
-                return;
-            }
-        }
-
-        if (line[0] == ':')
-            continue;
-
-        if (line[0] == '\t')
-        {
-            if (line[1] == ':')
-                continue;
-
-            char buf[MAX_LINE];
-            strcpy(buf, &line[1]);
-
-            char toks[MAX_TOK][MAX_TOK_LEN];
-            int n = splitIntoTokens(buf, toks);
-
-            if (n == 0)
-                continue;
-
-            if (sec == CODE)
-            {
-                // Validate macros
-                if (strcmp(toks[0], "halt") == 0)
-                {
-                    checkMacroArgumentCount("halt", 0, n);
-                    if (hadError)
-                        return;
-                }
-                else if (strcmp(toks[0], "in") == 0)
-                {
-                    checkMacroArgumentCount("in", 2, n);
-                    if (hadError)
-                        return;
-                    getRegisterNumber(toks[1]);
-                    if (hadError)
-                        return;
-                    getRegisterNumber(toks[2]);
-                    if (hadError)
-                        return;
-                }
-                else if (strcmp(toks[0], "out") == 0)
-                {
-                    checkMacroArgumentCount("out", 2, n);
-                    if (hadError)
-                        return;
-                    getRegisterNumber(toks[1]);
-                    if (hadError)
-                        return;
-                    getRegisterNumber(toks[2]);
-                    if (hadError)
-                        return;
-                }
-                else if (strcmp(toks[0], "clr") == 0)
-                {
-                    checkMacroArgumentCount("clr", 1, n);
-                    if (hadError)
-                        return;
-                    getRegisterNumber(toks[1]);
-                    if (hadError)
-                        return;
-                }
-                else if (strcmp(toks[0], "push") == 0)
-                {
-                    checkMacroArgumentCount("push", 1, n);
-                    if (hadError)
-                        return;
-                    getRegisterNumber(toks[1]);
-                    if (hadError)
-                        return;
-                }
-                else if (strcmp(toks[0], "pop") == 0)
-                {
-                    checkMacroArgumentCount("pop", 1, n);
-                    if (hadError)
-                        return;
-                    getRegisterNumber(toks[1]);
-                    if (hadError)
-                        return;
-                }
-                else if (strcmp(toks[0], "ld") == 0)
-                {
-                    checkMacroArgumentCount("ld", 2, n);
-                    if (hadError)
-                        return;
-                    getRegisterNumber(toks[1]);
-                    if (hadError)
-                        return;
-
-                    if (toks[2][0] != ':' && checkIfNegative(toks[2]))
-                    {
-                        fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
-                        hadError = 1;
-                        return;
-                    }
-
-                    else if (strcmp(toks[0], "ld") == 0)
-                    {
-                        checkMacroArgumentCount("ld", 2, n);
-                        if (hadError)
-                            return;
-
-                        int reg = getRegisterNumber(toks[1]);
-                        if (hadError)
-                            return;
-
-                        if (toks[2][0] != ':' && checkIfNegative(toks[2]))
-                        {
-                            fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
-                            hadError = 1;
-                            return;
-                        }
-
-                        // NEW: Additional validation
-                        if (toks[2][0] != ':')
-                        {
-                            // Check if it's a valid number format
-                            char *endptr = NULL;
-                            errno = 0; // Need to add: #include <errno.h> at top
-                            uint64_t val = strtoull(toks[2], &endptr, 0);
-
-                            if (errno == ERANGE || (endptr && *endptr != '\0'))
-                            {
-                                fprintf(stderr, "Error: invalid numeric literal '%s'\n", toks[2]);
-                                hadError = 1;
-                                return;
-                            }
-                        }
-
-                        convertToNumber(toks[2]);
-                        if (hadError)
-                            return;
-                    }
-                }
-                else
-                {
-                    // Validate regular instructions - find instruction type
-                    int found = 0;
-                    InstrType type = R;
-                    int exp = 0;
-
-                    for (int i = 0; i < tableSize; i++)
-                    {
-                        if (strcmp(instrTable[i].name, toks[0]) == 0)
-                        {
-                            type = instrTable[i].type;
-                            exp = instrTable[i].numOps;
-                            found = 1;
-                            break;
-                        }
-                    }
-
-                    if (!found)
-                    {
-                        fprintf(stderr, "Error: invalid instruction '%s'\n", toks[0]);
-                        hadError = 1;
-                        return;
-                    }
-
-                    // Check operand count
-                    int ops = n - 1;
-                    if (type == MOV)
-                    {
-                        if (ops < 2 || ops > 3)
-                        {
-                            fprintf(stderr, "Error: instruction 'mov' expects 2-3 operands, got %d\n", ops);
-                            hadError = 1;
-                            return;
-                        }
-                        else if (type == MOV)
-                        {
-                            if (n < 3 || n > 4)
-                            {
-                                fprintf(stderr, "Error: invalid mov format\n");
-                                hadError = 1;
-                                return;
-                            }
-
-                            // validate n==3 cases more strictly
-                            if (n == 3)
-                            {
-                                // Must be: mov rd, rs OR mov rd, imm
-                                // First operand MUST be a register
-                                if (toks[1][0] != 'r')
-                                {
-                                    fprintf(stderr, "Error: invalid mov format\n");
-                                    hadError = 1;
-                                    return;
-                                }
-
-                                if (toks[2][0] == 'r')
-                                {
-                                    // mov rd, rs
-                                    getRegisterNumber(toks[1]);
-                                    if (hadError)
-                                        return;
-                                    getRegisterNumber(toks[2]);
-                                    if (hadError)
-                                        return;
-                                }
-                                else
-                                {
-                                    // mov rd, imm
-                                    getRegisterNumber(toks[1]);
-                                    if (hadError)
-                                        return;
-
-                                    if (checkIfNegative(toks[2]))
-                                    {
-                                        fprintf(stderr, "Error: unsigned literal cannot be negative\n");
-                                        hadError = 1;
-                                        return;
-                                    }
-
-                                    uint64_t val = convertToNumber(toks[2]);
-                                    if (hadError)
-                                        return;
-
-                                    if (toks[2][0] != ':' && val > 4095)
-                                    {
-                                        fprintf(stderr, "Error: literal out of range\n");
-                                        hadError = 1;
-                                        return;
-                                    }
-                                }
-                            }
-                            else if (n == 4)
-                            {
-                                // Must be: mov rd, (rs)(imm) OR mov (rd)(imm), rs
-                                // Both patterns require first token to be a register
-                                if (toks[1][0] != 'r')
-                                {
-                                    fprintf(stderr, "Error: invalid mov format\n");
-                                    hadError = 1;
-                                    return;
-                                }
-
-                                // Check which pattern based on tokens 2 and 3
-                                if (toks[2][0] == 'r' && toks[3][0] != 'r')
-                                {
-                                    // mov rd, (rs)(imm) pattern
-                                    getRegisterNumber(toks[1]);
-                                    if (hadError)
-                                        return;
-                                    getRegisterNumber(toks[2]);
-                                    if (hadError)
-                                        return;
-
-                                    uint64_t val = convertToNumber(toks[3]);
-                                    if (hadError)
-                                        return;
-
-                                    if (toks[3][0] != ':')
-                                    {
-                                        int64_t sval = (int64_t)val;
-                                        if (sval < -2048 || sval > 2047)
-                                        {
-                                            fprintf(stderr, "Error: literal out of range\n");
-                                            hadError = 1;
-                                            return;
-                                        }
-                                    }
-                                }
-                                else if (toks[2][0] != 'r' && toks[3][0] == 'r')
-                                {
-                                    // mov (rd)(imm), rs pattern
-                                    getRegisterNumber(toks[1]);
-                                    if (hadError)
-                                        return;
-
-                                    uint64_t val = convertToNumber(toks[2]);
-                                    if (hadError)
-                                        return;
-
-                                    getRegisterNumber(toks[3]);
-                                    if (hadError)
-                                        return;
-
-                                    if (toks[2][0] != ':')
-                                    {
-                                        int64_t sval = (int64_t)val;
-                                        if (sval < -2048 || sval > 2047)
-                                        {
-                                            fprintf(stderr, "Error: literal out of range\n");
-                                            hadError = 1;
-                                            return;
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    // Invalid pattern: both registers or both literals
-                                    fprintf(stderr, "Error: invalid mov format\n");
-                                    hadError = 1;
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    else if (ops != exp)
-                    {
-                        fprintf(stderr, "Error: instruction '%s' expects %d operand(s), got %d\n",
-                                toks[0], exp, ops);
-                        hadError = 1;
-                        return;
-                    }
-
-                    // Validate operands based on type
-                    if (type == R)
-                    {
-                        getRegisterNumber(toks[1]);
-                        if (hadError)
-                            return;
-                        getRegisterNumber(toks[2]);
-                        if (hadError)
-                            return;
-                        getRegisterNumber(toks[3]);
-                        if (hadError)
-                            return;
-                    }
-                    else if (type == I)
-                    {
-                        getRegisterNumber(toks[1]);
-                        if (hadError)
-                            return;
-
-                        int uns = (strcmp(toks[0], "addi") == 0 || strcmp(toks[0], "subi") == 0 ||
-                                   strcmp(toks[0], "shftli") == 0 || strcmp(toks[0], "shftri") == 0);
-
-                        if (toks[2][0] == ':')
-                        {
-                            fprintf(stderr, "Error: label not allowed as immediate\n");
-                            hadError = 1;
-                            return;
-                        }
-
-                        if (uns && checkIfNegative(toks[2]))
-                        {
-                            fprintf(stderr, "Error: unsigned instruction cannot have negative literal\n");
-                            hadError = 1;
-                            return;
-                        }
-
-                        uint64_t val = convertToNumber(toks[2]);
-                        if (hadError)
-                            return;
-
-                        if (uns && val > 4095)
-                        {
-                            fprintf(stderr, "Error: literal out of range\n");
-                            hadError = 1;
-                            return;
-                        }
-                        else if (!uns)
-                        {
-                            int64_t sval = (int64_t)val;
-                            if (sval < -2048 || sval > 2047)
-                            {
-                                fprintf(stderr, "Error: literal out of range\n");
-                                hadError = 1;
-                                return;
-                            }
-                        }
-                    }
-                    else if (type == OTHER)
-                    {
-                        getRegisterNumber(toks[1]);
-                        if (hadError)
-                            return;
-                        getRegisterNumber(toks[2]);
-                        if (hadError)
-                            return;
-                    }
-                    else if (type == BR)
-                    {
-                        if (strcmp(toks[0], "brr") == 0 && toks[1][0] != 'r')
-                        {
-                            uint64_t val = convertToNumber(toks[1]);
-                            if (hadError)
-                                return;
-
-                            if (toks[1][0] != ':')
-                            {
-                                int64_t sval = (int64_t)val;
-                                if (sval < -2048 || sval > 2047)
-                                {
-                                    fprintf(stderr, "Error: literal out of range\n");
-                                    hadError = 1;
-                                    return;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            getRegisterNumber(toks[1]);
-                            if (hadError)
-                                return;
-                        }
-                    }
-                    else if (type == PRIV)
-                    {
-                        getRegisterNumber(toks[1]);
-                        if (hadError)
-                            return;
-                        getRegisterNumber(toks[2]);
-                        if (hadError)
-                            return;
-                        getRegisterNumber(toks[3]);
-                        if (hadError)
-                            return;
-
-                        uint64_t val = convertToNumber(toks[4]);
-                        if (hadError)
-                            return;
-
-                        if (toks[4][0] != ':' && val > 4095)
-                        {
-                            fprintf(stderr, "Error: literal out of range\n");
-                            hadError = 1;
-                            return;
-                        }
-                    }
-                    else if (type == MOV)
-                    {
-                        if (n < 3 || n > 4)
-                        {
-                            fprintf(stderr, "Error: invalid mov format\n");
-                            hadError = 1;
-                            return;
-                        }
-
-                        if (n == 3 && toks[1][0] == 'r' && toks[2][0] == 'r')
-                        {
-                            getRegisterNumber(toks[1]);
-                            if (hadError)
-                                return;
-                            getRegisterNumber(toks[2]);
-                            if (hadError)
-                                return;
-                        }
-                        else if (n == 3 && toks[1][0] == 'r' && toks[2][0] != 'r')
-                        {
-                            getRegisterNumber(toks[1]);
-                            if (hadError)
-                                return;
-
-                            if (toks[2][0] != ':' && checkIfNegative(toks[2]))
-                            {
-                                fprintf(stderr, "Error: unsigned literal cannot be negative\n");
-                                hadError = 1;
-                                return;
-                            }
-
-                            uint64_t val = convertToNumber(toks[2]);
-                            if (hadError)
-                                return;
-
-                            if (toks[2][0] != ':' && val > 4095)
-                            {
-                                fprintf(stderr, "Error: literal out of range\n");
-                                hadError = 1;
-                                return;
-                            }
-                        }
-                        else if (n == 4 && toks[1][0] == 'r' && toks[2][0] == 'r')
-                        {
-                            getRegisterNumber(toks[1]);
-                            if (hadError)
-                                return;
-                            getRegisterNumber(toks[2]);
-                            if (hadError)
-                                return;
-
-                            uint64_t val = convertToNumber(toks[3]);
-                            if (hadError)
-                                return;
-
-                            if (toks[3][0] != ':')
-                            {
-                                int64_t sval = (int64_t)val;
-                                if (sval < -2048 || sval > 2047)
-                                {
-                                    fprintf(stderr, "Error: literal out of range\n");
-                                    hadError = 1;
-                                    return;
-                                }
-                            }
-                        }
-                        else if (n == 4 && toks[1][0] == 'r' && toks[3][0] == 'r')
-                        {
-                            getRegisterNumber(toks[1]);
-                            if (hadError)
-                                return;
-
-                            uint64_t val = convertToNumber(toks[2]);
-                            if (hadError)
-                                return;
-
-                            getRegisterNumber(toks[3]);
-                            if (hadError)
-                                return;
-
-                            if (toks[2][0] != ':')
-                            {
-                                int64_t sval = (int64_t)val;
-                                if (sval < -2048 || sval > 2047)
-                                {
-                                    fprintf(stderr, "Error: literal out of range\n");
-                                    hadError = 1;
-                                    return;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            fprintf(stderr, "Error: invalid mov format\n");
-                            hadError = 1;
-                            return;
-                        }
-                    }
-                }
-            }
-            else if (sec == DATA)
-            {
-                if (checkIfNegative(buf))
-                {
-                    fprintf(stderr, "Error: data values must be unsigned\n");
-                    hadError = 1;
-                    return;
-                }
-
-                char *endptr = NULL;
-                errno = 0;
-                uint64_t val = strtoull(buf, &endptr, 0);
-
-                if (errno == ERANGE || (endptr && *endptr != '\0') || (endptr == buf))
-                {
-                    fprintf(stderr, "Error: invalid data value '%s'\n", buf);
-                    hadError = 1;
-                    return;
-                }
-
-                // Data values are stored as 32-bit, so check range
-                if (val > UINT32_MAX)
-                {
-                    fprintf(stderr, "Error: data value out of range\n");
-                    hadError = 1;
-                    return;
-                }
-            }
-        }
-        else
-        {
-            fprintf(stderr, "Error: invalid line format\n");
-            hadError = 1;
-            return;
-        }
+        exit(1);
     }
 }
 
@@ -1225,7 +601,7 @@ void firstPass(FILE *in, FILE *mid)
         {
             fprintf(stderr, "Error: instruction must begin with a tab\n");
             hadError = 1;
-            return;
+            exit(1);
         }
 
         // Handle directives
@@ -1255,7 +631,7 @@ void firstPass(FILE *in, FILE *mid)
             {
                 fprintf(stderr, "Error: invalid directive '%s'\n", line);
                 hadError = 1;
-                return;
+                exit(1);
             }
         }
 
@@ -1267,7 +643,7 @@ void firstPass(FILE *in, FILE *mid)
             {
                 fprintf(stderr, "Error: label must be alone on its line\n");
                 hadError = 1;
-                return;
+                exit(1);
             }
             // Labels already collected, skip
             continue;
@@ -1277,8 +653,6 @@ void firstPass(FILE *in, FILE *mid)
         if (line[0] == '\t')
         {
             handleTabLine(mid, line, sec, &addr);
-            if (hadError)
-                return;
         }
         else
         {
@@ -1286,7 +660,7 @@ void firstPass(FILE *in, FILE *mid)
             // This is an error - likely a malformed label or instruction
             fprintf(stderr, "Error: invalid line format\n");
             hadError = 1;
-            return;
+            exit(1);
         }
     }
     inFirst = 0;
@@ -1302,7 +676,7 @@ void checkInstructionOperands(const char *name, int exp, int act, InstrType type
         {
             fprintf(stderr, "Error: instruction 'mov' expects 2-3 operands, got %d\n", ops);
             hadError = 1;
-            return;
+            exit(1);
         }
         return;
     }
@@ -1312,26 +686,20 @@ void checkInstructionOperands(const char *name, int exp, int act, InstrType type
         fprintf(stderr, "Error: instruction '%s' expects %d operand(s), got %d\n",
                 name, exp, ops);
         hadError = 1;
-        return;
+        exit(1);
     }
 }
 
 void encodeRType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt)
 {
     *rd = getRegisterNumber(toks[1]);
-    if (hadError)
-        return;
     *rs = getRegisterNumber(toks[2]);
-    if (hadError)
-        return;
     *rt = getRegisterNumber(toks[3]);
 }
 
 void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *rd, uint32_t *imm)
 {
     *rd = getRegisterNumber(toks[1]);
-    if (hadError)
-        return;
 
     int uns = (strcmp(instr, "addi") == 0 || strcmp(instr, "subi") == 0 ||
                strcmp(instr, "shftli") == 0 || strcmp(instr, "shftri") == 0);
@@ -1344,26 +712,24 @@ void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *r
     {
         fprintf(stderr, "Error: label not allowed as immediate\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
     if (uns && toks[2][0] != ':' && checkIfNegative(toks[2]))
     {
         fprintf(stderr, "Error: unsigned instruction cannot have negative literal\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
     if (toks[2][0] == ':')
     {
         fprintf(stderr, "Error: label not allowed as immediate\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
     uint64_t val = convertToNumber(toks[2]);
-    if (hadError)
-        return;
 
     if (toks[2][0] != ':')
     {
@@ -1371,7 +737,7 @@ void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *r
         {
             fprintf(stderr, "Error: literal out of range\n");
             hadError = 1;
-            return;
+            exit(1);
         }
         else if (!uns)
         {
@@ -1380,12 +746,12 @@ void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *r
             {
                 fprintf(stderr, "Error: literal out of range\n");
                 hadError = 1;
-                return;
+                exit(1);
             }
         }
     }
 
-    *imm = (uint32_t)(val & 0xFFF);
+    *imm = (uint32_t)(val & 0xFFF); // Changed from 0x7FF to 0xFFF
 }
 
 void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *rd, uint32_t *imm)
@@ -1400,8 +766,6 @@ void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *r
     {
         *op = 0x0a;
         uint64_t val = convertToNumber(toks[1]);
-        if (hadError)
-            return;
 
         if (toks[1][0] != ':')
         {
@@ -1410,17 +774,15 @@ void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *r
             {
                 fprintf(stderr, "Error: literal out of range\n");
                 hadError = 1;
-                return;
+                exit(1);
             }
         }
 
-        *imm = (uint32_t)(val & 0xFFF);
+        *imm = (uint32_t)(val & 0xFFF); // Changed from 0x7FF to 0xFFF
     }
     else
     {
         *rd = getRegisterNumber(toks[1]);
-        if (hadError)
-            return;
         *imm = 0;
     }
 }
@@ -1428,27 +790,18 @@ void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *r
 void encodePrivType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt, uint32_t *imm)
 {
     *rd = getRegisterNumber(toks[1]);
-    if (hadError)
-        return;
     *rs = getRegisterNumber(toks[2]);
-    if (hadError)
-        return;
     *rt = getRegisterNumber(toks[3]);
-    if (hadError)
-        return;
-
     uint64_t val = convertToNumber(toks[4]);
-    if (hadError)
-        return;
 
     if (toks[4][0] != ':' && val > 4095)
     {
         fprintf(stderr, "Error: literal out of range\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
-    *imm = (uint32_t)(val & 0xFFF);
+    *imm = (uint32_t)(val & 0xFFF); // Changed from 0x7FF to 0xFFF
 }
 
 void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_t *rd, uint32_t *rs, uint32_t *imm)
@@ -1457,107 +810,99 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
     {
         fprintf(stderr, "Error: invalid mov format\n");
         hadError = 1;
-        return;
+        exit(1);
     }
+
+    // Validate that register tokens are actually registers
+    // This catches cases like "mov 123, r1" where 123 should be a register
 
     if (n == 3 && toks[1][0] == 'r' && toks[2][0] == 'r')
     {
         *op = 0x11;
         *rd = getRegisterNumber(toks[1]);
-        if (hadError)
-            return;
         *rs = getRegisterNumber(toks[2]);
-        if (hadError)
-            return;
         *imm = 0;
     }
     else if (n == 3 && toks[1][0] == 'r' && toks[2][0] != 'r')
     {
         *op = 0x12;
         *rd = getRegisterNumber(toks[1]);
-        if (hadError)
-            return;
 
         if (toks[2][0] != ':' && checkIfNegative(toks[2]))
         {
             fprintf(stderr, "Error: unsigned literal cannot be negative\n");
             hadError = 1;
-            return;
+            exit(1);
         }
 
         uint64_t val = convertToNumber(toks[2]);
-        if (hadError)
-            return;
 
         if (toks[2][0] != ':' && val > 4095)
         {
             fprintf(stderr, "Error: literal out of range\n");
             hadError = 1;
-            return;
+            exit(1);
         }
 
         *imm = (uint32_t)(val & 0xFFF);
     }
-    else if (n == 4 && toks[1][0] == 'r' && toks[2][0] == 'r')
+    else if (n == 4)
     {
-        *op = 0x10;
-        *rd = getRegisterNumber(toks[1]);
-        if (hadError)
-            return;
-        *rs = getRegisterNumber(toks[2]);
-        if (hadError)
-            return;
-
-        uint64_t val = convertToNumber(toks[3]);
-        if (hadError)
-            return;
-
-        if (toks[3][0] != ':')
+        // Check if this is (rd)(imm), rs pattern or rd, (rs)(imm) pattern
+        if (toks[1][0] == 'r' && toks[2][0] == 'r')
         {
-            int64_t sval = (int64_t)val;
-            if (sval < -2048 || sval > 2047)
+            // mov rd, (rs)(imm)
+            *op = 0x10;
+            *rd = getRegisterNumber(toks[1]);
+            *rs = getRegisterNumber(toks[2]);
+            uint64_t val = convertToNumber(toks[3]);
+
+            if (toks[3][0] != ':')
             {
-                fprintf(stderr, "Error: literal out of range\n");
-                hadError = 1;
-                return;
+                int64_t sval = (int64_t)val;
+                if (sval < -2048 || sval > 2047)
+                {
+                    fprintf(stderr, "Error: literal out of range\n");
+                    hadError = 1;
+                    exit(1);
+                }
             }
+
+            *imm = (uint32_t)(val & 0xFFF);
         }
-
-        *imm = (uint32_t)(val & 0xFFF);
-    }
-    else if (n == 4 && toks[1][0] == 'r' && toks[3][0] == 'r')
-    {
-        *op = 0x13;
-        *rd = getRegisterNumber(toks[1]);
-        if (hadError)
-            return;
-
-        uint64_t val = convertToNumber(toks[2]);
-        if (hadError)
-            return;
-
-        *rs = getRegisterNumber(toks[3]);
-        if (hadError)
-            return;
-
-        if (toks[2][0] != ':')
+        else if (toks[1][0] == 'r' && toks[3][0] == 'r')
         {
-            int64_t sval = (int64_t)val;
-            if (sval < -2048 || sval > 2047)
-            {
-                fprintf(stderr, "Error: literal out of range\n");
-                hadError = 1;
-                return;
-            }
-        }
+            // mov (rd)(imm), rs
+            *op = 0x13;
+            *rd = getRegisterNumber(toks[1]);
+            uint64_t val = convertToNumber(toks[2]);
+            *rs = getRegisterNumber(toks[3]);
 
-        *imm = (uint32_t)(val & 0xFFF);
+            if (toks[2][0] != ':')
+            {
+                int64_t sval = (int64_t)val;
+                if (sval < -2048 || sval > 2047)
+                {
+                    fprintf(stderr, "Error: literal out of range\n");
+                    hadError = 1;
+                    exit(1);
+                }
+            }
+
+            *imm = (uint32_t)(val & 0xFFF);
+        }
+        else
+        {
+            fprintf(stderr, "Error: invalid mov format\n");
+            hadError = 1;
+            exit(1);
+        }
     }
     else
     {
         fprintf(stderr, "Error: invalid mov format\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 }
 
@@ -1576,7 +921,7 @@ InstrType findInstructionInfo(char *name, uint32_t *op, int *exp)
 
     fprintf(stderr, "Error: invalid instruction '%s'\n", name);
     hadError = 1;
-    return R; // Return dummy value
+    exit(1);
 }
 
 uint32_t assembleInstruction(uint32_t op, uint32_t rd, uint32_t rs, uint32_t rt, uint32_t imm)
@@ -1596,61 +941,63 @@ uint32_t convertToMachineCode(char toks[MAX_TOK][MAX_TOK_LEN], int n)
     int exp = 0;
 
     InstrType type = findInstructionInfo(toks[0], &op, &exp);
-    if (hadError)
-        return 0;
-
     checkInstructionOperands(toks[0], exp, n, type);
-    if (hadError)
-        return 0;
 
     if (n != exp + 1 && type != MOV)
     {
         fprintf(stderr, "Error: wrong number of operands for '%s'\n", toks[0]);
         hadError = 1;
-        return 0;
+        exit(1);
     }
 
     if (type == R)
-    {
         encodeRType(toks, &rd, &rs, &rt);
-        if (hadError)
-            return 0;
-    }
     else if (type == I)
-    {
         encodeIType(toks, toks[0], &rd, &imm);
-        if (hadError)
-            return 0;
-    }
     else if (type == OTHER)
     {
         rd = getRegisterNumber(toks[1]);
-        if (hadError)
-            return 0;
         rs = getRegisterNumber(toks[2]);
-        if (hadError)
-            return 0;
     }
     else if (type == BR)
-    {
         encodeBranchType(toks, &op, &rd, &imm);
-        if (hadError)
-            return 0;
-    }
     else if (type == PRIV)
-    {
         encodePrivType(toks, &rd, &rs, &rt, &imm);
-        if (hadError)
-            return 0;
-    }
     else if (type == MOV)
-    {
         encodeMovType(toks, n, &op, &rd, &rs, &imm);
-        if (hadError)
-            return 0;
-    }
 
     return assembleInstruction(op, rd, rs, rt, imm);
+    // Zero unused fields by instruction type
+    switch (type)
+    {
+    case R:
+        imm = 0;
+        break;
+
+    case I:
+        rs = rt = 0;
+        break;
+
+    case BR:
+        rs = rt = 0;
+        break;
+
+    case OTHER:
+        rt = imm = 0;
+        break;
+
+    case MOV:
+        rt = 0;
+        break;
+
+    case PRIV:
+        // uses all fields
+        break;
+
+    case NO_OP:
+        rd = rs = rt = imm = 0;
+        break;
+    }
 }
 
 void writeCodeInstr(FILE *out, char *line)
@@ -1665,19 +1012,17 @@ void writeCodeInstr(FILE *out, char *line)
     {
         fprintf(stderr, "Error: empty instruction line\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
     if (n > MAX_TOK)
     {
         fprintf(stderr, "Error: too many operands\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
     uint32_t mc = convertToMachineCode(toks, n);
-    if (hadError)
-        return;
 
     // Write in little-endian byte order (LSB first)
     unsigned char bytes[4];
@@ -1698,13 +1043,10 @@ void writeDataValue(FILE *out, char *line)
     {
         fprintf(stderr, "Error: data values must be unsigned\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 
     uint64_t val = convertToNumber(buf);
-    if (hadError)
-        return;
-
     uint32_t v = (uint32_t)val;
 
     // Write in little-endian byte order (LSB first)
@@ -1735,7 +1077,7 @@ void secondPass(FILE *mid, FILE *out)
         {
             fprintf(stderr, "Error: instruction must begin with a tab\n");
             hadError = 1;
-            return;
+            exit(1);
         }
 
         // Handle directives
@@ -1755,7 +1097,7 @@ void secondPass(FILE *mid, FILE *out)
             {
                 fprintf(stderr, "Error: invalid directive '%s'\n", line);
                 hadError = 1;
-                return;
+                exit(1);
             }
         }
 
@@ -1775,21 +1117,13 @@ void secondPass(FILE *mid, FILE *out)
             {
                 fprintf(stderr, "Error: instr/data outside of .code/.data section\n");
                 hadError = 1;
-                return;
+                exit(1);
             }
 
             if (sec == CODE)
-            {
                 writeCodeInstr(out, line);
-                if (hadError)
-                    return;
-            }
             else if (sec == DATA)
-            {
                 writeDataValue(out, line);
-                if (hadError)
-                    return;
-            }
 
             continue;
         }
@@ -1797,7 +1131,7 @@ void secondPass(FILE *mid, FILE *out)
         // If we get here, line format is invalid
         fprintf(stderr, "Error: invalid line format\n");
         hadError = 1;
-        return;
+        exit(1);
     }
 }
 
@@ -1816,25 +1150,17 @@ int testmain(int argc, char **argv)
         return 1;
     }
 
-    // STEP 1: Collect all labels
+    // First, collect all labels
     collectLabels(fIn);
     if (hadError)
     {
         fclose(fIn);
         return 1;
     }
+
+    // Rewind to beginning for actual first pass
     fseek(fIn, 0, SEEK_SET);
 
-    // STEP 2: Validate all instructions (WITHOUT writing output)
-    validateAllInstructions(fIn);
-    if (hadError)
-    {
-        fclose(fIn);
-        return 1;
-    }
-    fseek(fIn, 0, SEEK_SET);
-
-    // STEP 3: NOW create intermediate file and write to it
     FILE *fMid = fopen(argv[2], "w+");
     if (!fMid)
     {
@@ -1848,19 +1174,16 @@ int testmain(int argc, char **argv)
     {
         fclose(fIn);
         fclose(fMid);
-        remove(argv[2]);
         return 1;
     }
     fclose(fIn);
     fseek(fMid, 0, SEEK_SET);
 
-    // STEP 4: Create binary output
     FILE *fOut = fopen(argv[3], "wb");
     if (!fOut)
     {
         fprintf(stderr, "Error: cannot open output file\n");
         fclose(fMid);
-        remove(argv[2]);
         return 1;
     }
 
@@ -1869,8 +1192,6 @@ int testmain(int argc, char **argv)
     {
         fclose(fMid);
         fclose(fOut);
-        remove(argv[2]);
-        remove(argv[3]);
         return 1;
     }
     fclose(fMid);
@@ -1884,11 +1205,8 @@ int main(int argc, char **argv)
     int ret = testmain(argc, argv);
     if (hadError)
     {
-        if (argc == 4)
-        {
-            remove(argv[2]);
-            remove(argv[3]);
-        }
+        remove(argv[2]);
+        remove(argv[3]);
     }
     return hadError ? 1 : ret;
 }
