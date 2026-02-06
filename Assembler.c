@@ -891,6 +891,7 @@ void validateFile(const char *filename)
     }
 
     char line[MAX_LINE];
+
     int currentMode = -1; // -1 = unknown, 0 = data, 1 = code
     int lineNum = 0;
     int hasCode = 0;
@@ -898,6 +899,10 @@ void validateFile(const char *filename)
     while (fgets(line, sizeof(line), f))
     {
         lineNum++;
+
+        char rawLine[MAX_LINE];
+        strcpy(rawLine, line);
+
         cleanLine(line);
 
         // skip empty lines and comments
@@ -938,13 +943,12 @@ void validateFile(const char *filename)
         }
 
         // handle labels
-        if (line[0] == ':')
+        if (rawLine[0] == ':')
         {
+            int i = 1;
 
-            char *label = line + 1;
-
-            // label must not be empty
-            if (*label == '\0')
+            // no empty label
+            if (rawLine[i] == '\n' || rawLine[i] == '\0')
             {
                 fprintf(stderr, "error line %d: empty label\n", lineNum);
                 hasError = 1;
@@ -952,37 +956,25 @@ void validateFile(const char *filename)
                 return;
             }
 
-            // label may not contain spaces or tabs
-            char *p = label;
-
-            // first character must be letter or underscore
-            if (!isalpha(*p) && *p != '_')
+            // first char must be letter or underscore
+            if (!isalpha(rawLine[i]) && rawLine[i] != '_')
             {
-                fprintf(stderr, "error line %d: invalid label name '%s'\n", lineNum, label);
+                fprintf(stderr, "error line %d: invalid label\n", lineNum);
                 hasError = 1;
                 fclose(f);
                 return;
             }
 
-            p++;
-
-            // remaining characters must be alphanumeric or underscore
-            while (*p)
+            // consume valid identifier characters
+            while (isalnum(rawLine[i]) || rawLine[i] == '_')
             {
-                if (!isalnum(*p) && *p != '_')
-                {
-                    fprintf(stderr, "error line %d: invalid label name '%s'\n", lineNum, label);
-                    hasError = 1;
-                    fclose(f);
-                    return;
-                }
-                p++;
+                i++;
             }
 
-            // label must be valid identifier
-            if (!isValidLabelName(label))
+            // after identifier, ONLY newline or end is allowed
+            if (rawLine[i] != '\n' && rawLine[i] != '\0')
             {
-                fprintf(stderr, "error line %d: invalid label name '%s'\n", lineNum, label);
+                fprintf(stderr, "error line %d: invalid label\n", lineNum);
                 hasError = 1;
                 fclose(f);
                 return;
