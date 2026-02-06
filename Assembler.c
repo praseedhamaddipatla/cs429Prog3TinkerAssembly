@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <errno.h>
 
 #define MAX_LINE 256
 #define MAX_TOKENS 4
@@ -894,7 +895,6 @@ void validateFile(const char *filename)
     int lineNum = 0;
     int hasCode = 0;
 
-
     while (fgets(line, sizeof(line), f))
     {
         lineNum++;
@@ -921,7 +921,7 @@ void validateFile(const char *filename)
             if (strcmp(line, ".code") == 0)
             {
                 currentMode = 1;
-                hasCode=1;
+                hasCode = 1;
             }
             else if (strcmp(line, ".data") == 0)
             {
@@ -1245,7 +1245,18 @@ void validateFile(const char *filename)
             }
             else if (currentMode == 0)
             {
-                // data section - validate data value
+                // data section - validate unsigned 64-bit integer
+
+                // labels are not allowed in data section
+                if (content[0] == ':')
+                {
+                    fprintf(stderr, "error line %d: labels not allowed in .data section\n", lineNum);
+                    hasError = 1;
+                    fclose(f);
+                    return;
+                }
+
+                // no negative values
                 if (isNegative(content))
                 {
                     fprintf(stderr, "error line %d: data values must be unsigned\n", lineNum);
@@ -1254,13 +1265,30 @@ void validateFile(const char *filename)
                     return;
                 }
 
-                parseNumber(content);
-                if (hasError)
+                // strict unsigned 64-bit range check
+                errno = 0;
+                char *end;
+                unsigned long long val = strtoull(content, &end, 0);
+
+                // invalid characters
+                if (*end != '\0')
                 {
+                    fprintf(stderr, "error line %d: invalid data value '%s'\n", lineNum, content);
+                    hasError = 1;
+                    fclose(f);
+                    return;
+                }
+
+                // overflow
+                if (errno == ERANGE)
+                {
+                    fprintf(stderr, "error line %d: data value out of 64-bit range\n", lineNum);
+                    hasError = 1;
                     fclose(f);
                     return;
                 }
             }
+
             else
             {
                 fprintf(stderr, "error line %d: instruction without .code or .data section\n", lineNum);
@@ -1277,7 +1305,8 @@ void validateFile(const char *filename)
             return;
         }
     }
-    if(!hasCode){
+    if (!hasCode)
+    {
         fprintf(stderr, "error: no .code in file");
     }
     fclose(f);
