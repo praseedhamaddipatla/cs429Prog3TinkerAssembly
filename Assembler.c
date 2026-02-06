@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <errno.h>
 
 #define MAX_LINE 512
 #define MAX_TOK 8
@@ -253,7 +254,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "halt") == 0)
     {
         checkMacroArgumentCount("halt", 0, n);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
         fprintf(out, "\tpriv r0, r0, r0, 0\n");
         *addr += 4;
         return 1;
@@ -262,7 +264,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "in") == 0)
     {
         checkMacroArgumentCount("in", 2, n);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
         fprintf(out, "\tpriv %s, %s, r0, 3\n", toks[1], toks[2]);
         *addr += 4;
         return 1;
@@ -271,7 +274,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "out") == 0)
     {
         checkMacroArgumentCount("out", 2, n);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
         fprintf(out, "\tpriv %s, %s, r0, 4\n", toks[1], toks[2]);
         *addr += 4;
         return 1;
@@ -280,7 +284,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "clr") == 0)
     {
         checkMacroArgumentCount("clr", 1, n);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
         fprintf(out, "\txor %s, %s, %s\n", toks[1], toks[1], toks[1]);
         *addr += 4;
         return 1;
@@ -289,9 +294,11 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "push") == 0)
     {
         checkMacroArgumentCount("push", 1, n);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
         getRegisterNumber(toks[1]);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
         fprintf(out, "\tmov (r31)(-8), %s\n", toks[1]);
         fprintf(out, "\tsubi r31, 8\n");
         *addr += 8;
@@ -301,9 +308,11 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "pop") == 0)
     {
         checkMacroArgumentCount("pop", 1, n);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
         getRegisterNumber(toks[1]);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
         fprintf(out, "\tmov %s, (r31)(0)\n", toks[1]);
         fprintf(out, "\taddi r31, 8\n");
         *addr += 8;
@@ -313,11 +322,13 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
     if (strcmp(name, "ld") == 0)
     {
         checkMacroArgumentCount("ld", 2, n);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
 
         // Validate register BEFORE checking literal
         int reg = getRegisterNumber(toks[1]);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
 
         if (toks[2][0] != ':' && checkIfNegative(toks[2]))
         {
@@ -327,7 +338,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         }
 
         uint64_t val = convertToNumber(toks[2]);
-        if (hadError) return 1;
+        if (hadError)
+            return 1;
 
         if (toks[2][0] != ':' && val > UINT64_MAX)
         {
@@ -510,6 +522,12 @@ void collectLabels(FILE *in)
 
             for (const char *p = lbl_name; *p; p++)
             {
+                if (isspace((unsigned char)*p))
+                {
+                    fprintf(stderr, "Error: label cannot contain spaces\n");
+                    hadError = 1;
+                    return;
+                }
                 if (!isalnum((unsigned char)*p) && *p != '_')
                 {
                     fprintf(stderr, "Error: invalid label name '%s'\n", line);
@@ -519,7 +537,8 @@ void collectLabels(FILE *in)
             }
 
             addLabelToArray(lbl_name, addr);
-            if (hadError) return;
+            if (hadError)
+                return;
             continue;
         }
 
@@ -648,53 +667,68 @@ void validateAllInstructions(FILE *in)
                 if (strcmp(toks[0], "halt") == 0)
                 {
                     checkMacroArgumentCount("halt", 0, n);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                 }
                 else if (strcmp(toks[0], "in") == 0)
                 {
                     checkMacroArgumentCount("in", 2, n);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                     getRegisterNumber(toks[1]);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                     getRegisterNumber(toks[2]);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                 }
                 else if (strcmp(toks[0], "out") == 0)
                 {
                     checkMacroArgumentCount("out", 2, n);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                     getRegisterNumber(toks[1]);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                     getRegisterNumber(toks[2]);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                 }
                 else if (strcmp(toks[0], "clr") == 0)
                 {
                     checkMacroArgumentCount("clr", 1, n);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                     getRegisterNumber(toks[1]);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                 }
                 else if (strcmp(toks[0], "push") == 0)
                 {
                     checkMacroArgumentCount("push", 1, n);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                     getRegisterNumber(toks[1]);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                 }
                 else if (strcmp(toks[0], "pop") == 0)
                 {
                     checkMacroArgumentCount("pop", 1, n);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                     getRegisterNumber(toks[1]);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                 }
                 else if (strcmp(toks[0], "ld") == 0)
                 {
                     checkMacroArgumentCount("ld", 2, n);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
                     getRegisterNumber(toks[1]);
-                    if (hadError) return;
+                    if (hadError)
+                        return;
 
                     if (toks[2][0] != ':' && checkIfNegative(toks[2]))
                     {
@@ -703,8 +737,43 @@ void validateAllInstructions(FILE *in)
                         return;
                     }
 
-                    convertToNumber(toks[2]);
-                    if (hadError) return;
+                    else if (strcmp(toks[0], "ld") == 0)
+                    {
+                        checkMacroArgumentCount("ld", 2, n);
+                        if (hadError)
+                            return;
+
+                        int reg = getRegisterNumber(toks[1]);
+                        if (hadError)
+                            return;
+
+                        if (toks[2][0] != ':' && checkIfNegative(toks[2]))
+                        {
+                            fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
+                            hadError = 1;
+                            return;
+                        }
+
+                        // NEW: Additional validation
+                        if (toks[2][0] != ':')
+                        {
+                            // Check if it's a valid number format
+                            char *endptr = NULL;
+                            errno = 0; // Need to add: #include <errno.h> at top
+                            uint64_t val = strtoull(toks[2], &endptr, 0);
+
+                            if (errno == ERANGE || (endptr && *endptr != '\0'))
+                            {
+                                fprintf(stderr, "Error: invalid numeric literal '%s'\n", toks[2]);
+                                hadError = 1;
+                                return;
+                            }
+                        }
+
+                        convertToNumber(toks[2]);
+                        if (hadError)
+                            return;
+                    }
                 }
                 else
                 {
@@ -712,7 +781,7 @@ void validateAllInstructions(FILE *in)
                     int found = 0;
                     InstrType type = R;
                     int exp = 0;
-                    
+
                     for (int i = 0; i < tableSize; i++)
                     {
                         if (strcmp(instrTable[i].name, toks[0]) == 0)
@@ -723,7 +792,7 @@ void validateAllInstructions(FILE *in)
                             break;
                         }
                     }
-                    
+
                     if (!found)
                     {
                         fprintf(stderr, "Error: invalid instruction '%s'\n", toks[0]);
@@ -741,6 +810,135 @@ void validateAllInstructions(FILE *in)
                             hadError = 1;
                             return;
                         }
+                        else if (type == MOV)
+                        {
+                            if (n < 3 || n > 4)
+                            {
+                                fprintf(stderr, "Error: invalid mov format\n");
+                                hadError = 1;
+                                return;
+                            }
+
+                            // validate n==3 cases more strictly
+                            if (n == 3)
+                            {
+                                // Must be: mov rd, rs OR mov rd, imm
+                                // First operand MUST be a register
+                                if (toks[1][0] != 'r')
+                                {
+                                    fprintf(stderr, "Error: invalid mov format\n");
+                                    hadError = 1;
+                                    return;
+                                }
+
+                                if (toks[2][0] == 'r')
+                                {
+                                    // mov rd, rs
+                                    getRegisterNumber(toks[1]);
+                                    if (hadError)
+                                        return;
+                                    getRegisterNumber(toks[2]);
+                                    if (hadError)
+                                        return;
+                                }
+                                else
+                                {
+                                    // mov rd, imm
+                                    getRegisterNumber(toks[1]);
+                                    if (hadError)
+                                        return;
+
+                                    if (checkIfNegative(toks[2]))
+                                    {
+                                        fprintf(stderr, "Error: unsigned literal cannot be negative\n");
+                                        hadError = 1;
+                                        return;
+                                    }
+
+                                    uint64_t val = convertToNumber(toks[2]);
+                                    if (hadError)
+                                        return;
+
+                                    if (toks[2][0] != ':' && val > 4095)
+                                    {
+                                        fprintf(stderr, "Error: literal out of range\n");
+                                        hadError = 1;
+                                        return;
+                                    }
+                                }
+                            }
+                            else if (n == 4)
+                            {
+                                // Must be: mov rd, (rs)(imm) OR mov (rd)(imm), rs
+                                // Both patterns require first token to be a register
+                                if (toks[1][0] != 'r')
+                                {
+                                    fprintf(stderr, "Error: invalid mov format\n");
+                                    hadError = 1;
+                                    return;
+                                }
+
+                                // Check which pattern based on tokens 2 and 3
+                                if (toks[2][0] == 'r' && toks[3][0] != 'r')
+                                {
+                                    // mov rd, (rs)(imm) pattern
+                                    getRegisterNumber(toks[1]);
+                                    if (hadError)
+                                        return;
+                                    getRegisterNumber(toks[2]);
+                                    if (hadError)
+                                        return;
+
+                                    uint64_t val = convertToNumber(toks[3]);
+                                    if (hadError)
+                                        return;
+
+                                    if (toks[3][0] != ':')
+                                    {
+                                        int64_t sval = (int64_t)val;
+                                        if (sval < -2048 || sval > 2047)
+                                        {
+                                            fprintf(stderr, "Error: literal out of range\n");
+                                            hadError = 1;
+                                            return;
+                                        }
+                                    }
+                                }
+                                else if (toks[2][0] != 'r' && toks[3][0] == 'r')
+                                {
+                                    // mov (rd)(imm), rs pattern
+                                    getRegisterNumber(toks[1]);
+                                    if (hadError)
+                                        return;
+
+                                    uint64_t val = convertToNumber(toks[2]);
+                                    if (hadError)
+                                        return;
+
+                                    getRegisterNumber(toks[3]);
+                                    if (hadError)
+                                        return;
+
+                                    if (toks[2][0] != ':')
+                                    {
+                                        int64_t sval = (int64_t)val;
+                                        if (sval < -2048 || sval > 2047)
+                                        {
+                                            fprintf(stderr, "Error: literal out of range\n");
+                                            hadError = 1;
+                                            return;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    // Invalid pattern: both registers or both literals
+                                    fprintf(stderr, "Error: invalid mov format\n");
+                                    hadError = 1;
+                                    return;
+                                }
+                            }
+                        }
                     }
                     else if (ops != exp)
                     {
@@ -754,16 +952,20 @@ void validateAllInstructions(FILE *in)
                     if (type == R)
                     {
                         getRegisterNumber(toks[1]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
                         getRegisterNumber(toks[2]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
                         getRegisterNumber(toks[3]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
                     }
                     else if (type == I)
                     {
                         getRegisterNumber(toks[1]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
 
                         int uns = (strcmp(toks[0], "addi") == 0 || strcmp(toks[0], "subi") == 0 ||
                                    strcmp(toks[0], "shftli") == 0 || strcmp(toks[0], "shftri") == 0);
@@ -783,7 +985,8 @@ void validateAllInstructions(FILE *in)
                         }
 
                         uint64_t val = convertToNumber(toks[2]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
 
                         if (uns && val > 4095)
                         {
@@ -805,16 +1008,19 @@ void validateAllInstructions(FILE *in)
                     else if (type == OTHER)
                     {
                         getRegisterNumber(toks[1]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
                         getRegisterNumber(toks[2]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
                     }
                     else if (type == BR)
                     {
                         if (strcmp(toks[0], "brr") == 0 && toks[1][0] != 'r')
                         {
                             uint64_t val = convertToNumber(toks[1]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
 
                             if (toks[1][0] != ':')
                             {
@@ -830,20 +1036,25 @@ void validateAllInstructions(FILE *in)
                         else
                         {
                             getRegisterNumber(toks[1]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
                         }
                     }
                     else if (type == PRIV)
                     {
                         getRegisterNumber(toks[1]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
                         getRegisterNumber(toks[2]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
                         getRegisterNumber(toks[3]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
 
                         uint64_t val = convertToNumber(toks[4]);
-                        if (hadError) return;
+                        if (hadError)
+                            return;
 
                         if (toks[4][0] != ':' && val > 4095)
                         {
@@ -864,14 +1075,17 @@ void validateAllInstructions(FILE *in)
                         if (n == 3 && toks[1][0] == 'r' && toks[2][0] == 'r')
                         {
                             getRegisterNumber(toks[1]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
                             getRegisterNumber(toks[2]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
                         }
                         else if (n == 3 && toks[1][0] == 'r' && toks[2][0] != 'r')
                         {
                             getRegisterNumber(toks[1]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
 
                             if (toks[2][0] != ':' && checkIfNegative(toks[2]))
                             {
@@ -881,7 +1095,8 @@ void validateAllInstructions(FILE *in)
                             }
 
                             uint64_t val = convertToNumber(toks[2]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
 
                             if (toks[2][0] != ':' && val > 4095)
                             {
@@ -893,12 +1108,15 @@ void validateAllInstructions(FILE *in)
                         else if (n == 4 && toks[1][0] == 'r' && toks[2][0] == 'r')
                         {
                             getRegisterNumber(toks[1]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
                             getRegisterNumber(toks[2]);
-                            if (hadError) return;
-                            
+                            if (hadError)
+                                return;
+
                             uint64_t val = convertToNumber(toks[3]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
 
                             if (toks[3][0] != ':')
                             {
@@ -914,13 +1132,16 @@ void validateAllInstructions(FILE *in)
                         else if (n == 4 && toks[1][0] == 'r' && toks[3][0] == 'r')
                         {
                             getRegisterNumber(toks[1]);
-                            if (hadError) return;
-                            
+                            if (hadError)
+                                return;
+
                             uint64_t val = convertToNumber(toks[2]);
-                            if (hadError) return;
-                            
+                            if (hadError)
+                                return;
+
                             getRegisterNumber(toks[3]);
-                            if (hadError) return;
+                            if (hadError)
+                                return;
 
                             if (toks[2][0] != ':')
                             {
@@ -951,8 +1172,24 @@ void validateAllInstructions(FILE *in)
                     return;
                 }
 
-                convertToNumber(buf);
-                if (hadError) return;
+                char *endptr = NULL;
+                errno = 0;
+                uint64_t val = strtoull(buf, &endptr, 0);
+
+                if (errno == ERANGE || (endptr && *endptr != '\0') || (endptr == buf))
+                {
+                    fprintf(stderr, "Error: invalid data value '%s'\n", buf);
+                    hadError = 1;
+                    return;
+                }
+
+                // Data values are stored as 32-bit, so check range
+                if (val > UINT32_MAX)
+                {
+                    fprintf(stderr, "Error: data value out of range\n");
+                    hadError = 1;
+                    return;
+                }
             }
         }
         else
@@ -1040,7 +1277,8 @@ void firstPass(FILE *in, FILE *mid)
         if (line[0] == '\t')
         {
             handleTabLine(mid, line, sec, &addr);
-            if (hadError) return;
+            if (hadError)
+                return;
         }
         else
         {
@@ -1081,16 +1319,19 @@ void checkInstructionOperands(const char *name, int exp, int act, InstrType type
 void encodeRType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt)
 {
     *rd = getRegisterNumber(toks[1]);
-    if (hadError) return;
+    if (hadError)
+        return;
     *rs = getRegisterNumber(toks[2]);
-    if (hadError) return;
+    if (hadError)
+        return;
     *rt = getRegisterNumber(toks[3]);
 }
 
 void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *rd, uint32_t *imm)
 {
     *rd = getRegisterNumber(toks[1]);
-    if (hadError) return;
+    if (hadError)
+        return;
 
     int uns = (strcmp(instr, "addi") == 0 || strcmp(instr, "subi") == 0 ||
                strcmp(instr, "shftli") == 0 || strcmp(instr, "shftri") == 0);
@@ -1121,7 +1362,8 @@ void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *r
     }
 
     uint64_t val = convertToNumber(toks[2]);
-    if (hadError) return;
+    if (hadError)
+        return;
 
     if (toks[2][0] != ':')
     {
@@ -1158,7 +1400,8 @@ void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *r
     {
         *op = 0x0a;
         uint64_t val = convertToNumber(toks[1]);
-        if (hadError) return;
+        if (hadError)
+            return;
 
         if (toks[1][0] != ':')
         {
@@ -1176,7 +1419,8 @@ void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *r
     else
     {
         *rd = getRegisterNumber(toks[1]);
-        if (hadError) return;
+        if (hadError)
+            return;
         *imm = 0;
     }
 }
@@ -1184,14 +1428,18 @@ void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *r
 void encodePrivType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs, uint32_t *rt, uint32_t *imm)
 {
     *rd = getRegisterNumber(toks[1]);
-    if (hadError) return;
+    if (hadError)
+        return;
     *rs = getRegisterNumber(toks[2]);
-    if (hadError) return;
+    if (hadError)
+        return;
     *rt = getRegisterNumber(toks[3]);
-    if (hadError) return;
-    
+    if (hadError)
+        return;
+
     uint64_t val = convertToNumber(toks[4]);
-    if (hadError) return;
+    if (hadError)
+        return;
 
     if (toks[4][0] != ':' && val > 4095)
     {
@@ -1216,16 +1464,19 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
     {
         *op = 0x11;
         *rd = getRegisterNumber(toks[1]);
-        if (hadError) return;
+        if (hadError)
+            return;
         *rs = getRegisterNumber(toks[2]);
-        if (hadError) return;
+        if (hadError)
+            return;
         *imm = 0;
     }
     else if (n == 3 && toks[1][0] == 'r' && toks[2][0] != 'r')
     {
         *op = 0x12;
         *rd = getRegisterNumber(toks[1]);
-        if (hadError) return;
+        if (hadError)
+            return;
 
         if (toks[2][0] != ':' && checkIfNegative(toks[2]))
         {
@@ -1235,7 +1486,8 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
         }
 
         uint64_t val = convertToNumber(toks[2]);
-        if (hadError) return;
+        if (hadError)
+            return;
 
         if (toks[2][0] != ':' && val > 4095)
         {
@@ -1250,12 +1502,15 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
     {
         *op = 0x10;
         *rd = getRegisterNumber(toks[1]);
-        if (hadError) return;
+        if (hadError)
+            return;
         *rs = getRegisterNumber(toks[2]);
-        if (hadError) return;
-        
+        if (hadError)
+            return;
+
         uint64_t val = convertToNumber(toks[3]);
-        if (hadError) return;
+        if (hadError)
+            return;
 
         if (toks[3][0] != ':')
         {
@@ -1274,13 +1529,16 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
     {
         *op = 0x13;
         *rd = getRegisterNumber(toks[1]);
-        if (hadError) return;
-        
+        if (hadError)
+            return;
+
         uint64_t val = convertToNumber(toks[2]);
-        if (hadError) return;
-        
+        if (hadError)
+            return;
+
         *rs = getRegisterNumber(toks[3]);
-        if (hadError) return;
+        if (hadError)
+            return;
 
         if (toks[2][0] != ':')
         {
@@ -1338,10 +1596,12 @@ uint32_t convertToMachineCode(char toks[MAX_TOK][MAX_TOK_LEN], int n)
     int exp = 0;
 
     InstrType type = findInstructionInfo(toks[0], &op, &exp);
-    if (hadError) return 0;
-    
+    if (hadError)
+        return 0;
+
     checkInstructionOperands(toks[0], exp, n, type);
-    if (hadError) return 0;
+    if (hadError)
+        return 0;
 
     if (n != exp + 1 && type != MOV)
     {
@@ -1353,34 +1613,41 @@ uint32_t convertToMachineCode(char toks[MAX_TOK][MAX_TOK_LEN], int n)
     if (type == R)
     {
         encodeRType(toks, &rd, &rs, &rt);
-        if (hadError) return 0;
+        if (hadError)
+            return 0;
     }
     else if (type == I)
     {
         encodeIType(toks, toks[0], &rd, &imm);
-        if (hadError) return 0;
+        if (hadError)
+            return 0;
     }
     else if (type == OTHER)
     {
         rd = getRegisterNumber(toks[1]);
-        if (hadError) return 0;
+        if (hadError)
+            return 0;
         rs = getRegisterNumber(toks[2]);
-        if (hadError) return 0;
+        if (hadError)
+            return 0;
     }
     else if (type == BR)
     {
         encodeBranchType(toks, &op, &rd, &imm);
-        if (hadError) return 0;
+        if (hadError)
+            return 0;
     }
     else if (type == PRIV)
     {
         encodePrivType(toks, &rd, &rs, &rt, &imm);
-        if (hadError) return 0;
+        if (hadError)
+            return 0;
     }
     else if (type == MOV)
     {
         encodeMovType(toks, n, &op, &rd, &rs, &imm);
-        if (hadError) return 0;
+        if (hadError)
+            return 0;
     }
 
     return assembleInstruction(op, rd, rs, rt, imm);
@@ -1409,7 +1676,8 @@ void writeCodeInstr(FILE *out, char *line)
     }
 
     uint32_t mc = convertToMachineCode(toks, n);
-    if (hadError) return;
+    if (hadError)
+        return;
 
     // Write in little-endian byte order (LSB first)
     unsigned char bytes[4];
@@ -1434,8 +1702,9 @@ void writeDataValue(FILE *out, char *line)
     }
 
     uint64_t val = convertToNumber(buf);
-    if (hadError) return;
-    
+    if (hadError)
+        return;
+
     uint32_t v = (uint32_t)val;
 
     // Write in little-endian byte order (LSB first)
@@ -1512,12 +1781,14 @@ void secondPass(FILE *mid, FILE *out)
             if (sec == CODE)
             {
                 writeCodeInstr(out, line);
-                if (hadError) return;
+                if (hadError)
+                    return;
             }
             else if (sec == DATA)
             {
                 writeDataValue(out, line);
-                if (hadError) return;
+                if (hadError)
+                    return;
             }
 
             continue;
