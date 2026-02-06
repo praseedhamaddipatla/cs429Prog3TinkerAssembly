@@ -4,19 +4,18 @@
 #include <stdint.h>
 #include <assert.h>
 
-// assembler functions
-int getReg(const char *s);
-uint64_t toNum(const char *s);
-void addLbl(const char *n, uint64_t a);
-uint64_t findLbl(const char *n);
-int tokenize(char *s, char t[8][64]);
-int tryMacro(FILE *f, char t[8][64], int n, uint64_t *a);
-uint32_t toMC(char t[8][64], int n);
-void clean(char *s);
+int getReg(const char *s);                 
+uint64_t toNum(const char *s);                 
+void addLbl(const char *name, uint64_t addr);
+uint64_t findLbl(const char *name);           
+int tokenize(char *line, char tokens[8][64]);  
+int tryMacro(FILE *f, char tokens[8][64], int n, uint64_t *addr);  
+uint32_t toMC(char tokens[8][64], int n);     
+void clean(char *line);
 
 // helpers for testing
 void resetLabels() {
-    extern int nlbl;
+    extern int nlbl;  // use assembler's label counter
     nlbl = 0;
 }
 
@@ -91,7 +90,6 @@ void test_clean() {
     assert(strcmp(s, "mov r1, r2 ") == 0);
 }
 
-// Main test runner
 int main() {
     printf("Running Assembler tests...\n");
 
