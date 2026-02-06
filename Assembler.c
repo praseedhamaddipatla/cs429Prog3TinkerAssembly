@@ -10,6 +10,7 @@
 #define MAX_INSTS 2048
 #define START_ADDR 0x1000
 
+// global arrays for labels and instructions 
 typedef struct {
     char name[50];
     int addr;
@@ -33,6 +34,7 @@ int numInstructions = 0;
 char *intermediateFile;
 char *binaryFile;
 
+// utility functions 
 
 void cleanupAndExit() {
     FILE *f1 = fopen(intermediateFile, "w");
@@ -82,6 +84,7 @@ void verifyArgs(Instruction inst, int expected) {
     }
 }
 
+// first pass - just collect label addresses 
 
 int calculateInstructionSize(const char *opcode) {
     // calculate how much space this instruction will take after macro expansion
@@ -146,6 +149,7 @@ void firstPass(const char *filename) {
     fclose(f);
 }
 
+// macro expansion helpers 
 
 void expandLoadInstruction(Instruction current) {
     // ld rd, L -> series of xor, addi, shftli instructions to load 64-bit literal
@@ -306,6 +310,7 @@ int tryExpandMacro(Instruction current) {
     return current.addr + 4;
 }
 
+// second pass - parse and expand macros 
 
 int parseCodeLine(char *line, int address) {
     // parse instruction and expand macros
@@ -421,6 +426,8 @@ void secondPass(const char *filename) {
     fclose(f);
 }
 
+// output intermediate file 
+
 void writeIntermediate(const char *filename) {
     FILE *f = fopen(filename, "w");
     if (!f) {
@@ -466,6 +473,7 @@ void writeIntermediate(const char *filename) {
     fclose(f);
 }
 
+// binary output 
 
 void writeBinaryInstruction(FILE *f, int opcode, char *rd, char *rs, char *rt, char *immediate) {
     unsigned int binaryInstruction = 0;
@@ -639,6 +647,337 @@ void writeBinary(const char *filename) {
     fclose(f);
 }
 
+// validation functions 
+
+int hasError = 0;
+
+int isNegative(const char *str) {
+    // check if string represents a negative number
+    return str[0] == '-';
+}
+
+int validateRegister(const char *reg) {
+    // validate register format and range
+    if (reg[0] != 'r') {
+        fprintf(stderr, "error: invalid register '%s'\n", reg);
+        hasError = 1;
+        return -1;
+    }
+    
+    if (!isdigit((unsigned char)reg[1])) {
+        fprintf(stderr, "error: invalid register '%s'\n", reg);
+        hasError = 1;
+        return -1;
+    }
+    
+    int regNum = atoi(reg + 1);
+    if (regNum < 0 || regNum > 31) {
+        fprintf(stderr, "error: register number must be 0-31, got %d\n", regNum);
+        hasError = 1;
+        return -1;
+    }
+    
+    return regNum;
+}
+
+uint64_t parseNumber(const char *str) {
+    // parse number literal, handling labels
+    if (str[0] == ':') {
+        // it's a label reference, validation will happen later
+        return 0;
+    }
+    
+    // check for valid number
+    char *end;
+    uint64_t value = strtoull(str, &end, 0);
+    
+    if (end == str || *end != '\0') {
+        fprintf(stderr, "error: invalid number '%s'\n", str);
+        hasError = 1;
+        return 0;
+    }
+    
+    return value;
+}
+
+void validateMacroArgs(const char *macroName, int expected, int actual) {
+    // check macro argument count
+    if (actual != expected) {
+        fprintf(stderr, "error: macro '%s' expects %d args, got %d\n", 
+                macroName, expected, actual);
+        hasError = 1;
+    }
+}
+
+void validateFile(const char *filename) {
+    // validate assembly file before processing
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        fprintf(stderr, "error: cannot open file for validation\n");
+        hasError = 1;
+        return;
+    }
+    
+    char line[MAX_LINE];
+    int currentMode = -1;  // -1 = unknown, 0 = data, 1 = code
+    int lineNum = 0;
+    
+    while (fgets(line, sizeof(line), f)) {
+        lineNum++;
+        cleanLine(line);
+        
+        // skip empty lines and comments
+        if (line[0] == '\0' || line[0] == ';') {
+            continue;
+        }
+        
+        // check for invalid leading spaces
+        if (line[0] == ' ') {
+            fprintf(stderr, "error line %d: instructions must start with tab\n", lineNum);
+            hasError = 1;
+            fclose(f);
+            return;
+        }
+        
+        // handle section directives
+        if (line[0] == '.') {
+            if (strcmp(line, ".code") == 0) {
+                currentMode = 1;
+            } else if (strcmp(line, ".data") == 0) {
+                currentMode = 0;
+            } else {
+                fprintf(stderr, "error line %d: invalid directive '%s'\n", lineNum, line);
+                hasError = 1;
+                fclose(f);
+                return;
+            }
+            continue;
+        }
+        
+        // handle labels
+        if (line[0] == ':') {
+            continue;
+        }
+        
+        // handle instructions/data
+        if (line[0] == '\t') {
+            char *content = line + 1;  // skip tab
+            
+            // skip inline labels
+            if (content[0] == ':') {
+                continue;
+            }
+            
+            if (currentMode == 1) {
+                // code section - validate instruction
+                char buffer[MAX_LINE];
+                strcpy(buffer, content);
+                
+                // tokenize
+                const char *delim = " ,()";
+                char *token = strtok(buffer, delim);
+                if (!token) continue;
+                
+                char tokens[10][MAX_LINE];
+                int numTokens = 0;
+                
+                strcpy(tokens[numTokens++], token);
+                while ((token = strtok(NULL, delim)) != NULL && numTokens < 10) {
+                    strcpy(tokens[numTokens++], token);
+                }
+                
+                char *opcode = tokens[0];
+                int argCount = numTokens - 1;
+                
+                // validate macros
+                if (strcmp(opcode, "halt") == 0) {
+                    validateMacroArgs("halt", 0, argCount);
+                } else if (strcmp(opcode, "in") == 0) {
+                    validateMacroArgs("in", 2, argCount);
+                    if (!hasError && argCount >= 2) {
+                        validateRegister(tokens[1]);
+                        validateRegister(tokens[2]);
+                    }
+                } else if (strcmp(opcode, "out") == 0) {
+                    validateMacroArgs("out", 2, argCount);
+                    if (!hasError && argCount >= 2) {
+                        validateRegister(tokens[1]);
+                        validateRegister(tokens[2]);
+                    }
+                } else if (strcmp(opcode, "clr") == 0) {
+                    validateMacroArgs("clr", 1, argCount);
+                    if (!hasError && argCount >= 1) {
+                        validateRegister(tokens[1]);
+                    }
+                } else if (strcmp(opcode, "push") == 0) {
+                    validateMacroArgs("push", 1, argCount);
+                    if (!hasError && argCount >= 1) {
+                        validateRegister(tokens[1]);
+                    }
+                } else if (strcmp(opcode, "pop") == 0) {
+                    validateMacroArgs("pop", 1, argCount);
+                    if (!hasError && argCount >= 1) {
+                        validateRegister(tokens[1]);
+                    }
+                } else if (strcmp(opcode, "ld") == 0) {
+                    validateMacroArgs("ld", 2, argCount);
+                    if (!hasError && argCount >= 2) {
+                        validateRegister(tokens[1]);
+                        // second arg can be label or literal
+                        if (tokens[2][0] != ':') {
+                            if (isNegative(tokens[2])) {
+                                fprintf(stderr, "error: 'ld' literal cannot be negative\n");
+                                hasError = 1;
+                            } else {
+                                parseNumber(tokens[2]);
+                            }
+                        }
+                    }
+                }
+                // regular instructions - basic validation
+                else if (strcmp(opcode, "add") == 0 || strcmp(opcode, "sub") == 0 ||
+                         strcmp(opcode, "mul") == 0 || strcmp(opcode, "div") == 0 ||
+                         strcmp(opcode, "and") == 0 || strcmp(opcode, "or") == 0 ||
+                         strcmp(opcode, "xor") == 0 || strcmp(opcode, "shftr") == 0 ||
+                         strcmp(opcode, "shftl") == 0 || strcmp(opcode, "addf") == 0 ||
+                         strcmp(opcode, "subf") == 0 || strcmp(opcode, "mulf") == 0 ||
+                         strcmp(opcode, "divf") == 0) {
+                    // three register instructions
+                    if (argCount != 3) {
+                        fprintf(stderr, "error: instruction '%s' expects 3 args\n", opcode);
+                        hasError = 1;
+                    } else {
+                        validateRegister(tokens[1]);
+                        validateRegister(tokens[2]);
+                        validateRegister(tokens[3]);
+                    }
+                } else if (strcmp(opcode, "addi") == 0 || strcmp(opcode, "subi") == 0 ||
+                           strcmp(opcode, "shftli") == 0 || strcmp(opcode, "shftri") == 0) {
+                    // register + immediate instructions
+                    if (argCount != 2) {
+                        fprintf(stderr, "error: instruction '%s' expects 2 args\n", opcode);
+                        hasError = 1;
+                    } else {
+                        validateRegister(tokens[1]);
+                        // immediate can be literal only (no labels)
+                        if (tokens[2][0] != ':') {
+                            parseNumber(tokens[2]);
+                        }
+                    }
+                } else if (strcmp(opcode, "not") == 0) {
+                    if (argCount != 2) {
+                        fprintf(stderr, "error: instruction 'not' expects 2 args\n");
+                        hasError = 1;
+                    } else {
+                        validateRegister(tokens[1]);
+                        validateRegister(tokens[2]);
+                    }
+                } else if (strcmp(opcode, "br") == 0) {
+                    if (argCount != 1) {
+                        fprintf(stderr, "error: instruction 'br' expects 1 arg\n");
+                        hasError = 1;
+                    } else {
+                        validateRegister(tokens[1]);
+                    }
+                } else if (strcmp(opcode, "brr") == 0) {
+                    if (argCount != 1) {
+                        fprintf(stderr, "error: instruction 'brr' expects 1 arg\n");
+                        hasError = 1;
+                    }
+                    // can be register or immediate
+                } else if (strcmp(opcode, "brnz") == 0) {
+                    if (argCount != 2) {
+                        fprintf(stderr, "error: instruction 'brnz' expects 2 args\n");
+                        hasError = 1;
+                    } else {
+                        validateRegister(tokens[1]);
+                        validateRegister(tokens[2]);
+                    }
+                } else if (strcmp(opcode, "call") == 0) {
+                    if (argCount != 3) {
+                        fprintf(stderr, "error: instruction 'call' expects 3 args\n");
+                        hasError = 1;
+                    } else {
+                        validateRegister(tokens[1]);
+                        validateRegister(tokens[2]);
+                        validateRegister(tokens[3]);
+                    }
+                } else if (strcmp(opcode, "return") == 0) {
+                    if (argCount != 0) {
+                        fprintf(stderr, "error: instruction 'return' expects 0 args\n");
+                        hasError = 1;
+                    }
+                } else if (strcmp(opcode, "brgt") == 0) {
+                    if (argCount != 3) {
+                        fprintf(stderr, "error: instruction 'brgt' expects 3 args\n");
+                        hasError = 1;
+                    } else {
+                        validateRegister(tokens[1]);
+                        validateRegister(tokens[2]);
+                        validateRegister(tokens[3]);
+                    }
+                } else if (strcmp(opcode, "priv") == 0) {
+                    if (argCount != 4) {
+                        fprintf(stderr, "error: instruction 'priv' expects 4 args\n");
+                        hasError = 1;
+                    } else {
+                        validateRegister(tokens[1]);
+                        validateRegister(tokens[2]);
+                        validateRegister(tokens[3]);
+                        // fourth arg is immediate
+                        if (tokens[4][0] != ':') {
+                            parseNumber(tokens[4]);
+                        }
+                    }
+                } else if (strcmp(opcode, "mov") == 0) {
+                    // mov has variable args due to memory addressing
+                    // basic validation - at least 2 args
+                    if (argCount < 2) {
+                        fprintf(stderr, "error: instruction 'mov' expects at least 2 args\n");
+                        hasError = 1;
+                    }
+                } else {
+                    fprintf(stderr, "error: unknown instruction '%s'\n", opcode);
+                    hasError = 1;
+                }
+                
+                if (hasError) {
+                    fclose(f);
+                    return;
+                }
+                
+            } else if (currentMode == 0) {
+                // data section - validate data value
+                if (isNegative(content)) {
+                    fprintf(stderr, "error line %d: data values must be unsigned\n", lineNum);
+                    hasError = 1;
+                    fclose(f);
+                    return;
+                }
+                
+                parseNumber(content);
+                if (hasError) {
+                    fclose(f);
+                    return;
+                }
+            } else {
+                fprintf(stderr, "error line %d: instruction without .code or .data section\n", lineNum);
+                hasError = 1;
+                fclose(f);
+                return;
+            }
+        } else {
+            fprintf(stderr, "error line %d: invalid line format\n", lineNum);
+            hasError = 1;
+            fclose(f);
+            return;
+        }
+    }
+    
+    fclose(f);
+}
+
+// main function 
 
 int main(int argc, char *argv[]) {
     if (argc != 4) {
@@ -648,6 +987,12 @@ int main(int argc, char *argv[]) {
     
     intermediateFile = argv[2];
     binaryFile = argv[3];
+    
+    // validate input file first
+    validateFile(argv[1]);
+    if (hasError) {
+        return 1;
+    }
     
     // run two-pass assembly
     firstPass(argv[1]);
