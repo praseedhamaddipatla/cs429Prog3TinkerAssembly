@@ -1,0 +1,38 @@
+.code
+	xor r5,r5,r5
+	ld r10,0xABCDEFF012345678
+	mov (r5)(100),r10
+	push r5
+	add r1,r2,r3
+	subi r31,16
+	mov r2,(r5)(100)
+:LOOP_START
+	brnz r1,r2
+	mov (r31)(-1),r0
+	mov (r31)(2047),r1
+	mov r10,(r5)(-2048)
+	clr r15
+	pop r15
+	halt
+.data
+:BASE_VAL
+	0xFFFFFFFFFFFFFFFF
+:COUNTER
+	500
+.code
+:MAIN
+	in r1,r2
+	out r2,r1
+	shftli r1,8
+	addi r1,15
+	ld r0,:BASE_VAL
+	ld r1,:COUNTER
+	call r0,r1,r31
+:BRANCH
+	brr :LOOP_START
+	brgt r1,r2,r3
+	clr r31
+.code
+	sub r0,r0,r0
+:EXIT_LBL
+	halt

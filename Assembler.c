@@ -1277,6 +1277,7 @@ void validateFile(const char *filename)
                     fclose(f);
                     return;
                 }
+                (void)val;
             }
 
             else
