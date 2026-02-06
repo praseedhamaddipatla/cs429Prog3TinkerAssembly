@@ -50,7 +50,6 @@ void cleanupAndExit()
     exit(1);
 }
 
-
 void cleanLine(char *s)
 {
     // remove newline
@@ -137,37 +136,33 @@ void firstPass(const char *filename)
 
         if (buffer[0] == ':')
         {
-            int i = 1;
+            const char *name = buffer + 1;
 
             // empty label
-            if (buffer[i] == '\0' || buffer[i] == '\n')
-            {
-                fprintf(stderr, "error: empty label\n");
-                cleanupAndExit();
-            }
-
-            // first character must be letter or underscore
-            if (!isalpha((unsigned char)buffer[i]) && buffer[i] != '_')
+            if (*name == '\0')
             {
                 fprintf(stderr, "error: invalid label\n");
                 cleanupAndExit();
             }
 
-            // consume valid identifier characters
-            while (isalnum((unsigned char)buffer[i]) || buffer[i] == '_')
-            {
-                i++;
-            }
-
-            // anything else is invalid (spaces, tabs, junk)
-            if (buffer[i] != '\0' && buffer[i] != '\n')
+            // first character
+            if (!isalpha((unsigned char)*name) && *name != '_')
             {
                 fprintf(stderr, "error: invalid label\n");
                 cleanupAndExit();
             }
 
-            // safe to add label
-            addLabel(buffer, address);
+            // validate entire label
+            for (const char *p = name; *p; p++)
+            {
+                if (!isalnum((unsigned char)*p) && *p != '_')
+                {
+                    fprintf(stderr, "error: invalid label\n");
+                    cleanupAndExit();
+                }
+            }
+
+            addLabel(name, address);
             continue;
         }
 
