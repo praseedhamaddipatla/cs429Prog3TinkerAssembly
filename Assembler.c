@@ -313,6 +313,7 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         // Validate register BEFORE checking literal
         int reg = getRegisterNumber(toks[1]); // This will error if invalid
 
+        // Check for negative literal (not allowed for ld, even before label check)
         if (toks[2][0] != ':' && checkIfNegative(toks[2]))
         {
             fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
@@ -321,12 +322,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         }
 
         uint64_t val = convertToNumber(toks[2]);
-        if (toks[2][0] != ':' && val > UINT64_MAX)
-        {
-            fprintf(stderr, "Error: ld literal overflow\n");
-            hadError = 1;
-            exit(1);
-        }
+        // convertToNumber handles label resolution
+        // No need to check for overflow - we're loading a 64-bit value into a 64-bit register via ld
 
         writeLdMacro(out, reg, val);
         *addr += 52; // 13 instructions * 4 bytes
@@ -352,14 +349,13 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
         else if (n == 4)
         {
             // Either: mov (rd)(imm), rs OR mov rd, (rs)(imm) OR mov rd, imm
-            // Check if token 1 is a register and token 2 is a number (could be negative)
+            // Check if token 1 is a register and token 2 is a number (could be negative or label)
             int tok1_is_reg = (toks[1][0] == 'r');
             int tok2_is_num = (toks[2][0] == '-' || isdigit(toks[2][0]) || toks[2][0] == ':');
 
             if (tok1_is_reg && tok2_is_num)
             {
-                // mov rd, imm (but shouldn't be 4 tokens... this is mov rd, rs, imm which is invalid for output)
-                // Actually this is: mov (rd)(imm), rs pattern split into: mov, rd, imm, rs
+                // mov (rd)(imm), rs pattern split into: mov, rd, imm, rs
                 fprintf(out, "(%s)(%s), %s\n", toks[1], toks[2], toks[3]);
             }
             else
@@ -751,7 +747,7 @@ void encodeIType(char toks[MAX_TOK][MAX_TOK_LEN], const char *instr, uint32_t *r
         }
     }
 
-    *imm = (uint32_t)(val & 0xFFF); // Changed from 0x7FF to 0xFFF
+    *imm = (uint32_t)(val & 0xFFF);
 }
 
 void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *rd, uint32_t *imm)
@@ -778,7 +774,7 @@ void encodeBranchType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *op, uint32_t *r
             }
         }
 
-        *imm = (uint32_t)(val & 0xFFF); // Changed from 0x7FF to 0xFFF
+        *imm = (uint32_t)(val & 0xFFF);
     }
     else
     {
@@ -801,7 +797,7 @@ void encodePrivType(char toks[MAX_TOK][MAX_TOK_LEN], uint32_t *rd, uint32_t *rs,
         exit(1);
     }
 
-    *imm = (uint32_t)(val & 0xFFF); // Changed from 0x7FF to 0xFFF
+    *imm = (uint32_t)(val & 0xFFF);
 }
 
 void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_t *rd, uint32_t *rs, uint32_t *imm)
@@ -828,23 +824,38 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
         *op = 0x12;
         *rd = getRegisterNumber(toks[1]);
 
-        if (toks[2][0] != ':' && checkIfNegative(toks[2]))
+        // Labels are allowed in mov rd, imm
+        if (toks[2][0] == ':')
         {
-            fprintf(stderr, "Error: unsigned literal cannot be negative\n");
-            hadError = 1;
-            exit(1);
+            uint64_t val = convertToNumber(toks[2]);
+            if (val > 4095)
+            {
+                fprintf(stderr, "Error: literal out of range\n");
+                hadError = 1;
+                exit(1);
+            }
+            *imm = (uint32_t)(val & 0xFFF);
         }
-
-        uint64_t val = convertToNumber(toks[2]);
-
-        if (toks[2][0] != ':' && val > 4095)
+        else
         {
-            fprintf(stderr, "Error: literal out of range\n");
-            hadError = 1;
-            exit(1);
-        }
+            if (checkIfNegative(toks[2]))
+            {
+                fprintf(stderr, "Error: unsigned literal cannot be negative\n");
+                hadError = 1;
+                exit(1);
+            }
 
-        *imm = (uint32_t)(val & 0xFFF);
+            uint64_t val = convertToNumber(toks[2]);
+
+            if (val > 4095)
+            {
+                fprintf(stderr, "Error: literal out of range\n");
+                hadError = 1;
+                exit(1);
+            }
+
+            *imm = (uint32_t)(val & 0xFFF);
+        }
     }
     else if (n == 4)
     {
@@ -967,37 +978,6 @@ uint32_t convertToMachineCode(char toks[MAX_TOK][MAX_TOK_LEN], int n)
         encodeMovType(toks, n, &op, &rd, &rs, &imm);
 
     return assembleInstruction(op, rd, rs, rt, imm);
-    // Zero unused fields by instruction type
-    switch (type)
-    {
-    case R:
-        imm = 0;
-        break;
-
-    case I:
-        rs = rt = 0;
-        break;
-
-    case BR:
-        rs = rt = 0;
-        break;
-
-    case OTHER:
-        rt = imm = 0;
-        break;
-
-    case MOV:
-        rt = 0;
-        break;
-
-    case PRIV:
-        // uses all fields
-        break;
-
-    case NO_OP:
-        rd = rs = rt = imm = 0;
-        break;
-    }
 }
 
 void writeCodeInstr(FILE *out, char *line)
@@ -1047,6 +1027,15 @@ void writeDataValue(FILE *out, char *line)
     }
 
     uint64_t val = convertToNumber(buf);
+    
+    // Check if the value fits in 32 bits
+    if (val > UINT32_MAX)
+    {
+        fprintf(stderr, "Error: data value out of range\n");
+        hadError = 1;
+        exit(1);
+    }
+    
     uint32_t v = (uint32_t)val;
 
     // Write in little-endian byte order (LSB first)
