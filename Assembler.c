@@ -953,15 +953,30 @@ void validateFile(const char *filename)
             }
 
             // label may not contain spaces or tabs
-            for (char *p = label; *p; p++)
+            char *p = label;
+
+            // first character must be letter or underscore
+            if (!isalpha(*p) && *p != '_')
             {
-                if (*p == ' ' || *p == '\t')
+                fprintf(stderr, "error line %d: invalid label name '%s'\n", lineNum, label);
+                hasError = 1;
+                fclose(f);
+                return;
+            }
+
+            p++;
+
+            // remaining characters must be alphanumeric or underscore
+            while (*p)
+            {
+                if (!isalnum(*p) && *p != '_')
                 {
-                    fprintf(stderr, "error line %d: invalid whitespace in label\n", lineNum);
+                    fprintf(stderr, "error line %d: invalid label name '%s'\n", lineNum, label);
                     hasError = 1;
                     fclose(f);
                     return;
                 }
+                p++;
             }
 
             // label must be valid identifier
