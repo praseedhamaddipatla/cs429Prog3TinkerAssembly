@@ -194,27 +194,25 @@ uint64_t convertToNumber(const char *lit)
 
 void writeLdMacro(FILE *out, int rd, uint64_t val)
 {
-    uint32_t chunks[6];
-    
-    chunks[0] = (val >> 52) & 0xFFF;
-    chunks[1] = (val >> 40) & 0xFFF;
-    chunks[2] = (val >> 28) & 0xFFF;
-    chunks[3] = (val >> 16) & 0xFFF;
-    chunks[4] = (val >> 4) & 0xFFF;
-    chunks[5] = val & 0xF;
+    uint32_t p0 = (val >> 52) & 0xFFF;
+    uint32_t p1 = (val >> 40) & 0xFFF;
+    uint32_t p2 = (val >> 28) & 0xFFF;
+    uint32_t p3 = (val >> 16) & 0xFFF;
+    uint32_t p4 = (val >> 4) & 0xFFF;
+    uint32_t p5 = val & 0xF;
 
     fprintf(out, "\txor r%d, r%d, r%d\n", rd, rd, rd);
-    
-    fprintf(out, "\taddi r%d, %u\n", rd, chunks[0]);
-    
-    for (int i = 1; i < 5; i++)
-    {
-        fprintf(out, "\tshftli r%d, 12\n", rd);
-        fprintf(out, "\taddi r%d, %u\n", rd, chunks[i]);
-    }
-    
+    fprintf(out, "\taddi r%d, %u\n", rd, p0);
+    fprintf(out, "\tshftli r%d, 12\n", rd);
+    fprintf(out, "\taddi r%d, %u\n", rd, p1);
+    fprintf(out, "\tshftli r%d, 12\n", rd);
+    fprintf(out, "\taddi r%d, %u\n", rd, p2);
+    fprintf(out, "\tshftli r%d, 12\n", rd);
+    fprintf(out, "\taddi r%d, %u\n", rd, p3);
+    fprintf(out, "\tshftli r%d, 12\n", rd);
+    fprintf(out, "\taddi r%d, %u\n", rd, p4);
     fprintf(out, "\tshftli r%d, 4\n", rd);
-    fprintf(out, "\taddi r%d, %u\n", rd, chunks[5]);
+    fprintf(out, "\taddi r%d, %u\n", rd, p5);
 }
 
 void checkMacroArgumentCount(const char *name, int exp, int act)
@@ -411,7 +409,7 @@ void handleTabLine(FILE *out, char *line, Section sec, uint64_t *addr)
     {
         uint64_t val = convertToNumber(orig);
         fprintf(out, "\t%llu\n", (unsigned long long)val);
-        *addr += 4;
+        *addr += 8;
     }
 }
 
@@ -519,7 +517,7 @@ void collectLabels(FILE *in)
             }
             else if (sec == DATA)
             {
-                addr += 4;
+                addr += 8;
             }
             continue;
         }
@@ -916,7 +914,7 @@ void firstPass(FILE *in, FILE *mid)
     inFirst = 1;
     char line[MAX_LINE];
     Section sec = NONE;
-    Section lastWritten = NONE;
+    int prevType = -1;
     uint64_t addr = CODE_START;
 
     while (fgets(line, sizeof(line), in))
@@ -938,21 +936,11 @@ void firstPass(FILE *in, FILE *mid)
             if (strcmp(line, ".code") == 0)
             {
                 sec = CODE;
-                if (lastWritten != CODE)
-                {
-                    fprintf(mid, ".code\n");
-                    lastWritten = CODE;
-                }
                 continue;
             }
             else if (strcmp(line, ".data") == 0)
             {
                 sec = DATA;
-                if (lastWritten != DATA)
-                {
-                    fprintf(mid, ".data\n");
-                    lastWritten = DATA;
-                }
                 continue;
             }
             else
@@ -976,6 +964,16 @@ void firstPass(FILE *in, FILE *mid)
 
         if (line[0] == '\t')
         {
+            int currType = (sec == CODE) ? 1 : 0;
+            if (currType != prevType)
+            {
+                if (currType == 1)
+                    fprintf(mid, ".code\n");
+                else
+                    fprintf(mid, ".data\n");
+                prevType = currType;
+            }
+            
             handleTabLine(mid, line, sec, &addr);
             if (hadError) return;
         }
@@ -1368,16 +1366,8 @@ void writeDataValue(FILE *out, char *line)
 
     uint64_t val = convertToNumber(buf);
     if (hadError) return;
-    
-    uint32_t v = (uint32_t)val;
 
-    unsigned char bytes[4];
-    bytes[0] = v & 0xFF;
-    bytes[1] = (v >> 8) & 0xFF;
-    bytes[2] = (v >> 16) & 0xFF;
-    bytes[3] = (v >> 24) & 0xFF;
-
-    fwrite(bytes, 4, 1, out);
+    fwrite(&val, 8, 1, out);
 }
 
 void secondPass(FILE *mid, FILE *out)
