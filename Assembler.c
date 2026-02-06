@@ -124,6 +124,14 @@ void cleanLine(char *line)
     {
         line[len - 1] = '\0';
     }
+    
+    // ADDED: Remove trailing whitespace to catch invalid trailing content
+    len = strlen(line);
+    while (len > 0 && (line[len - 1] == ' ' || line[len - 1] == '\t'))
+    {
+        line[len - 1] = '\0';
+        len--;
+    }
 }
 
 int splitIntoTokens(char *line, char toks[MAX_TOK][MAX_TOK_LEN])
@@ -313,7 +321,6 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         // Validate register BEFORE checking literal
         int reg = getRegisterNumber(toks[1]); // This will error if invalid
 
-        // Check for negative literal (not allowed for ld, even before label check)
         if (toks[2][0] != ':' && checkIfNegative(toks[2]))
         {
             fprintf(stderr, "Error: 'ld' cannot have negative literal\n");
@@ -322,9 +329,8 @@ int tryExpandMacro(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n, uint64_t *
         }
 
         uint64_t val = convertToNumber(toks[2]);
-        // convertToNumber handles label resolution
-        // No need to check for overflow - we're loading a 64-bit value into a 64-bit register via ld
-
+        // REMOVED: overflow check - strtoull handles the full uint64 range correctly
+        
         writeLdMacro(out, reg, val);
         *addr += 52; // 13 instructions * 4 bytes
         return 1;
@@ -349,7 +355,7 @@ void printResolvedInstr(FILE *out, char toks[MAX_TOK][MAX_TOK_LEN], int n)
         else if (n == 4)
         {
             // Either: mov (rd)(imm), rs OR mov rd, (rs)(imm) OR mov rd, imm
-            // Check if token 1 is a register and token 2 is a number (could be negative or label)
+            // Check if token 1 is a register and token 2 is a number (could be negative)
             int tok1_is_reg = (toks[1][0] == 'r');
             int tok2_is_num = (toks[2][0] == '-' || isdigit(toks[2][0]) || toks[2][0] == ':');
 
@@ -824,38 +830,23 @@ void encodeMovType(char toks[MAX_TOK][MAX_TOK_LEN], int n, uint32_t *op, uint32_
         *op = 0x12;
         *rd = getRegisterNumber(toks[1]);
 
-        // Labels are allowed in mov rd, imm
-        if (toks[2][0] == ':')
+        if (toks[2][0] != ':' && checkIfNegative(toks[2]))
         {
-            uint64_t val = convertToNumber(toks[2]);
-            if (val > 4095)
-            {
-                fprintf(stderr, "Error: literal out of range\n");
-                hadError = 1;
-                exit(1);
-            }
-            *imm = (uint32_t)(val & 0xFFF);
+            fprintf(stderr, "Error: unsigned literal cannot be negative\n");
+            hadError = 1;
+            exit(1);
         }
-        else
+
+        uint64_t val = convertToNumber(toks[2]);
+
+        if (toks[2][0] != ':' && val > 4095)
         {
-            if (checkIfNegative(toks[2]))
-            {
-                fprintf(stderr, "Error: unsigned literal cannot be negative\n");
-                hadError = 1;
-                exit(1);
-            }
-
-            uint64_t val = convertToNumber(toks[2]);
-
-            if (val > 4095)
-            {
-                fprintf(stderr, "Error: literal out of range\n");
-                hadError = 1;
-                exit(1);
-            }
-
-            *imm = (uint32_t)(val & 0xFFF);
+            fprintf(stderr, "Error: literal out of range\n");
+            hadError = 1;
+            exit(1);
         }
+
+        *imm = (uint32_t)(val & 0xFFF);
     }
     else if (n == 4)
     {
@@ -1028,7 +1019,7 @@ void writeDataValue(FILE *out, char *line)
 
     uint64_t val = convertToNumber(buf);
     
-    // Check if the value fits in 32 bits
+    // ADDED: Check if the value fits in 32 bits
     if (val > UINT32_MAX)
     {
         fprintf(stderr, "Error: data value out of range\n");
